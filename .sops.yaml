@@ -1,0 +1,12 @@
+keys:
+  # people
+  - &admin_sinan age1q5sfy74d53n6jxlgsc2zrsz4wcl9d830nxuagc3wfmdkrrp55ckq9ev6nv
+  # machines
+  - &machine_tcs age1hux3h87h0480ss493kl292alfe6m6z5dhe76phvuk2c82hvg9clqmp6d8d
+
+creation_rules:
+  # default
+  - key_groups:
+      - age:
+          - *admin_sinan
+          - *machine_tcs
