@@ -1,0 +1,32 @@
+{{- /*
+Dapr distributed-tracing Configuration (spec 004-observability-otel-refactor,
+Task 3). Dapr sidecars emit tracing spans for service-invocation / pub-sub
+hops. By default Dapr tracing in this chart is OFF (sidecars only log to
+stdout), so cross-service hops do NOT connect into the OTel trace graph.
+
+This Configuration, when enabled, points the Dapr OTLP trace exporter at the
+in-cluster OTel collector (otlp gRPC :4317). Spans then land on the same
+collector pipelines as the app spans, so a single trace spans both the app
+SERVER/CLIENT spans AND the Dapr sidecar hops.
+
+NOT YET wired by default because enabling it requires adding a
+`dapr.io/config: {{ .Release.Name }}-tracing` annotation to every microservice
+pod template (~15 files) — that pod-annotation rollout is deferred to keep this
+Phase-1 change low-risk. Flip daprTracing.enabled=true AND add the annotation
+to opt a service in. W3C tracecontext + baggage propagation already works
+regardless of this resource (Dapr propagates headers even with tracing off),
+so the bud.* baggage keys are unaffected.
+*/ -}}
+{{- if .Values.daprTracing.enabled }}
+apiVersion: dapr.io/v1alpha1
+kind: Configuration
+metadata:
+  name: {{ .Release.Name }}-tracing
+spec:
+  tracing:
+    samplingRate: {{ .Values.daprTracing.samplingRate | default "1" | quote }}
+    otel:
+      endpointAddress: "{{ .Release.Name }}-otel-collector:4317"
+      isSecure: false
+      protocol: grpc
+{{- end }}

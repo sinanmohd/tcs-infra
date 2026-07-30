@@ -1,0 +1,13 @@
+diskPool:
+  bud-hetzner-ax52-0:
+    node: bud-hetzner-ax52-0
+    disks: ["aio:///dev/mapper/vg1-openebs--mayastor"]
+    maxExpansion: "1TiB"
+  bud-hetzner-ax52-1:
+    node: bud-hetzner-ax52-1
+    disks: ["aio:///dev/mapper/vg1-openebs--mayastor"]
+    maxExpansion: "1TiB"
+  bud-hetzner-ax52-2:
+    node: bud-hetzner-ax52-2
+    disks: ["aio:///dev/mapper/vg1-openebs--mayastor"]
+    maxExpansion: "1TiB"

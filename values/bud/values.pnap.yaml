@@ -1,0 +1,42 @@
+ingress:
+    https: internal
+global:
+    ingress:
+        hosts:
+            root: "pnap.bud-demo.com"
+
+externalServices:
+    oidc:
+        url: "https://auth.pnap.bud-demo.com/realms/bud-keycloak"
+    s3:
+        endpoint: "s3.pnap.bud-demo.com"
+        secure: true
+
+microservices:
+    budapp:
+        redirectFlow:
+            clientsByHost:
+                budadmin:
+                    hosts:
+                        - '{{ include "bud.ingress.hosts.budadmin" . }}'
+                    allowedReturnUrlOrigins:
+                        - '{{ include "bud.ingress.url.budadmin" . }}'
+                budcustomer:
+                    hosts:
+                        - '{{ include "bud.ingress.hosts.budcustomer" . }}'
+                    allowedReturnUrlOrigins:
+                        - '{{ include "bud.ingress.url.budcustomer" . }}'
+                budplayground:
+                    hosts:
+                        - '{{ include "bud.ingress.hosts.budplayground" . }}'
+                    allowedReturnUrlOrigins:
+                        - '{{ include "bud.ingress.url.budplayground" . }}'
+    budsim:
+        env:
+            # Single/master-only node cluster: allow CPU deployments on control-plane nodes
+            SKIP_MASTER_NODE_FOR_CPU: "false"
+    budcluster:
+        env:
+            # Single/master-only node cluster: allow model-transfer and runtime pods
+            # to schedule on the control-plane node (drops the master-excluding affinity)
+            SKIP_MASTER_NODE_FOR_CPU: "false"

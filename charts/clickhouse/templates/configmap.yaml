@@ -1,0 +1,61 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: "{{ .Release.Name }}-clickhouse-db-create-script"
+data:
+  script.sh: |-
+    ch_isready() {
+      while true; do
+        clickhouse-client \
+          --host clickhouse-clickhouse \
+          -q ""
+        exit_code="$?"
+
+        if [[ "$exit_code" = "0" ]]; then
+          break
+        else
+          echo "Waiting for clickhouse"
+          sleep 4
+          continue
+        fi
+      done
+    }
+
+    echo "Waiting for ClickHouse to be ready"
+    ch_isready
+    echo "ClickHouse is ready"
+
+    {{ $clusterString := ""}}
+    {{- if gt $.Values.replicaCount 1.0 }}
+    {{ $clusterString = " on cluster 'cluster'"}}
+    {{- end -}}
+
+    echo "Updating databases on {{ $.Values.replicaCount }} replicas"
+    clickhouse-client \
+      --host clickhouse-clickhouse <<- EOF
+    {{- range $userName, $userValue := .Values.users }}
+
+
+      # ======>
+      # user: {{ $userName }}
+      CREATE USER IF NOT EXISTS '{{ $userName }}' {{- $clusterString }};
+      ALTER USER '{{ $userName }}' {{- $clusterString }} IDENTIFIED WITH sha256_password BY '{{ $userValue.password }}';
+
+      # grants
+      {{- range $userValue.grants }}
+      grant {{ . }} TO '{{ $userName }}' {{- $clusterString }};
+      {{- end }}
+
+      # databases
+      {{- range $userValue.databases }}
+      CREATE DATABASE IF NOT EXISTS {{ .name }} {{- $clusterString }} {{ .extraArgs }};
+      grant ALL ON {{ .name }}.* TO {{ $userName }} {{- $clusterString }};
+      {{- end }}
+
+      {{ if $userValue.databases -}}
+      ALTER USER '{{ $userName }}' {{- $clusterString }} DEFAULT DATABASE '{{ (index $userValue.databases 0).name }}';
+      {{- end }}
+    {{- end }}
+    EOF
+
+    echo "Success"

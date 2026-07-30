@@ -1,0 +1,107 @@
+{{- if (default .Values.microservices.budsim.enabled false) }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-budsim
+  annotations:
+    {{- range $key, $value := .Values.deploymentAnnotations }}
+    {{ $key }}: {{ $value | quote }}
+    {{- end }}
+spec:
+  {{- if not (and .Values.microservices.budsim.autoscaling .Values.microservices.budsim.autoscaling.enabled) }}
+  replicas: 1
+  {{- end }}
+  selector:
+    matchLabels:
+      app: {{ .Release.Name }}-budsim
+  template:
+    metadata:
+      labels:
+        app: {{ .Release.Name }}-budsim
+      annotations:
+        dapr.io/enabled: "true"
+        dapr.io/app-id: {{ .Values.microservices.budsim.daprid }}
+        dapr.io/app-port: "3002"
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- $nodeSelector := include "bud.nodeSelector" (dict "service" .Values.microservices.budsim "global" .Values.global "context" $) }}
+      {{- if $nodeSelector }}
+      nodeSelector:
+        {{- $nodeSelector | nindent 8 }}
+      {{- end }}
+      {{- $affinity := include "bud.affinity" (dict "service" .Values.microservices.budsim "global" .Values.global "context" $) }}
+      {{- if $affinity }}
+      affinity:
+        {{- $affinity | nindent 8 }}
+      {{- end }}
+      containers:
+      - name: {{ .Release.Name }}-budsim
+        image: {{ .Values.microservices.budsim.image }}
+        imagePullPolicy: {{ .Values.imagePullPolicy }}
+        command: ["sh", "-c", "alembic upgrade head && uvicorn budsim.main:app --host 0.0.0.0 --port 3002"]
+        ports:
+        - containerPort: 3002
+        env:
+          - name: PSQL_HOST
+            value: {{ $.Values.externalServices.postgresql.host | quote }}
+          - name: PSQL_PORT
+            value: {{ $.Values.externalServices.postgresql.port | quote }}
+          - name: PSQL_USER
+            value: {{ $.Values.externalServices.postgresql.databases.budsim.username | quote }}
+          - name: PSQL_PASSWORD
+            value: {{ $.Values.externalServices.postgresql.databases.budsim.password | quote }}
+          - name: PSQL_DB_NAME
+            value: {{ $.Values.externalServices.postgresql.databases.budsim.name | quote }}
+        {{ $root := . }}
+        {{- range $key, $value := .Values.microservices.budsim.env }}
+          - name: {{ $key }}
+            value: {{ tpl $value $root | quote }}
+        {{- end }}
+        envFrom:
+          - configMapRef:
+              name: {{ .Release.Name}}-bud-global
+        {{- with .Values.microservices.budsim.resources }}
+        resources:
+          {{- toYaml . | nindent 10 }}
+        {{- end }}
+        {{- include "bud.healthProbes" (dict "port" 3002 "probes" .Values.microservices.budsim.probes) | nindent 8 }}
+        volumeMounts:
+        - name: models-registry
+          mountPath: /data/models-registry
+      volumes:
+      - name: models-registry
+        persistentVolumeClaim:
+          claimName: {{ .Release.Name }}-bud-models-registry
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Release.Name }}-budsim
+spec:
+  ports:
+  - port: 3002
+    targetPort: 3002
+  selector:
+    app: {{ .Release.Name }}-budsim
+  type: ClusterIP
+---
+apiVersion: dapr.io/v2alpha1
+kind: Subscription
+metadata:
+  name: {{ .Release.Name }}-budsim-pubsub-subscription
+spec:
+  topic: budSimMessages
+  routes:
+    default: /notifications
+  pubsubname: {{ .Release.Name }}-pubsub
+  deadLetterTopic: poisonMessages
+scopes:
+  - budsim
+{{- if and .Values.microservices.budsim.autoscaling .Values.microservices.budsim.autoscaling.enabled }}
+---
+{{- include "bud.hpa" (dict "serviceName" "budsim" "Values" .Values "Release" .Release) }}
+{{- end }}
+{{ end }}

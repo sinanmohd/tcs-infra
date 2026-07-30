@@ -1,0 +1,17 @@
+apiVersion: v2
+
+name: kyverno
+description: A Helm chart for kyverno
+type: application
+version: 0.0.1
+
+maintainers:
+  - name: "sinanmohd"
+    email: "sinan@sinanmohd.com"
+    url: "https://www.sinanmohd.com"
+
+dependencies:
+  - name: kyverno
+    version: 3.8.2
+    repository: https://kyverno.github.io/kyverno
+    condition: kyverno.enabled

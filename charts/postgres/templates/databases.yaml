@@ -1,0 +1,14 @@
+{{- range $user, $value := .Values.users }}
+{{- range $value.databases }}
+apiVersion: postgresql.cnpg.io/v1
+kind: Database
+metadata:
+  name: {{ $user }}-{{ . }}
+spec:
+  name: {{ . }}
+  owner: {{ $user }}
+  cluster:
+    name: postgres
+---
+{{- end -}}
+{{- end -}}

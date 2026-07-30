@@ -1,0 +1,63 @@
+{{- if $.Values.microservices.budsentinel.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-budsentinel
+  annotations:
+    {{- range $key, $value := .Values.deploymentAnnotations }}
+    {{ $key }}: {{ $value | quote }}
+    {{- end }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: {{ .Release.Name }}-budsentinel
+  template:
+    metadata:
+      labels:
+        app: {{ .Release.Name }}-budsentinel
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- $nodeSelector := include "bud.nodeSelector" (dict "service" .Values.microservices.budsentinel "global" .Values.global "context" $) }}
+      {{- if $nodeSelector }}
+      nodeSelector:
+        {{- $nodeSelector | nindent 8 }}
+      {{- end }}
+      {{- $affinity := include "bud.affinity" (dict "service" .Values.microservices.budsentinel "global" .Values.global "context" $) }}
+      {{- if $affinity }}
+      affinity:
+        {{- $affinity | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: budsentinel
+          image: {{ .Values.microservices.budsentinel.image }}
+          imagePullPolicy: {{ .Values.imagePullPolicy }}
+          command: ["grpc-server"]
+          ports:
+            - containerPort: 50051
+          env:
+          {{ $root := . }}
+          {{- range $key, $value := .Values.microservices.budsentinel.env }}
+            - name: {{ $key }}
+              value: {{ tpl $value $root | quote }}
+          {{- end }}
+          {{- with .Values.microservices.budsentinel.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Release.Name }}-budsentinel
+spec:
+  selector:
+    app: {{ .Release.Name }}-budsentinel
+  ports:
+    - protocol: TCP
+      port: 50051
+      targetPort: 50051
+{{- end }}

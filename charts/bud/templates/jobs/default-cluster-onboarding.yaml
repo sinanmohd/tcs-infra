@@ -1,0 +1,189 @@
+{{- /*
+  Default-cluster onboarding bundle.
+
+  Registers the cluster the platform is deployed on as the "default" cluster, so the
+  user does not have to upload its own kubeconfig from the budadmin UI after Helm install.
+
+  Components:
+    - Secret with a shared internal token (consumed by budapp + this Job).
+    - ServiceAccount + ClusterRoleBinding granting the Job the same level of access an
+      externally-uploaded kubeconfig would have (NFD/HAMI install, namespace creation, ...).
+    - Helm post-install / post-upgrade Job that mints an in-cluster kubeconfig from its own
+      SA token and POSTs it to budapp's internal default-cluster endpoint. Idempotent —
+      budapp short-circuits if a default cluster already exists.
+*/ -}}
+{{- if and (default .Values.microservices.budapp.enabled false) (default .Values.microservices.budcluster.enabled false) (default (default dict .Values.microservices.budcluster.registerDefaultCluster).enabled false) }}
+{{- $tokenSecretName := printf "%s-bud-internal-token" .Release.Name }}
+{{- $existing := lookup "v1" "Secret" .Release.Namespace $tokenSecretName }}
+{{- $token := "" }}
+{{- if $existing }}
+{{-   $token = index $existing.data "token" | b64dec }}
+{{- else if .Values.microservices.budcluster.registerDefaultCluster.token }}
+{{-   $token = .Values.microservices.budcluster.registerDefaultCluster.token }}
+{{- else }}
+{{-   $token = randAlphaNum 48 }}
+{{- end }}
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ $tokenSecretName }}
+  annotations:
+    "helm.sh/resource-policy": keep
+type: Opaque
+data:
+  token: {{ $token | b64enc | quote }}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ .Release.Name }}-default-cluster-onboarder
+  annotations:
+    "helm.sh/resource-policy": keep
+---
+# Long-lived token for the SA. Pod-bound projected tokens at
+# /var/run/secrets/kubernetes.io/serviceaccount/token are invalidated when the Job
+# pod is deleted; persisting the kubeconfig with that token would 401 the next
+# health-sync. A SecretType=kubernetes.io/service-account-token Secret stays valid
+# as long as the SA exists, so the kubeconfig in budcluster's DB keeps working.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ .Release.Name }}-default-cluster-onboarder-token
+  annotations:
+    kubernetes.io/service-account.name: {{ .Release.Name }}-default-cluster-onboarder
+    "helm.sh/resource-policy": keep
+type: kubernetes.io/service-account-token
+---
+# Cluster-admin binding for the onboarder ServiceAccount.
+#
+# Deliberately NOT marked "helm.sh/resource-policy: keep": leaving a cluster-scoped
+# admin binding behind after `helm uninstall` would create a privileged orphan that
+# any future ServiceAccount with the same name/namespace could inherit. Helm cleans
+# this up on uninstall like any other managed resource.
+#
+# The SA + token Secret ARE kept (needed for periodic health-sync to keep working
+# across helm upgrades that don't redeploy the onboarder Job). On uninstall, Helm
+# removes the binding, the SA, and its token Secret atomically, neutering the
+# stored kubeconfig.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ .Release.Name }}-default-cluster-onboarder
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: cluster-admin
+subjects:
+- kind: ServiceAccount
+  name: {{ .Release.Name }}-default-cluster-onboarder
+  namespace: {{ .Release.Namespace }}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ .Release.Name }}-default-cluster-onboarding
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "50"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: {{ default 6 .Values.microservices.budcluster.registerDefaultCluster.backoffLimit }}
+  ttlSecondsAfterFinished: 600
+  template:
+    spec:
+      restartPolicy: OnFailure
+      serviceAccountName: {{ .Release.Name }}-default-cluster-onboarder
+      containers:
+      - name: onboarder
+        image: {{ default "curlimages/curl:8.10.1" .Values.microservices.budcluster.registerDefaultCluster.image }}
+        env:
+        - name: BUDAPP_URL
+          value: "http://{{ .Release.Name }}-budapp:9082"
+        - name: CLUSTER_NAME
+          value: {{ default (printf "%s-default" .Release.Name) .Values.microservices.budcluster.registerDefaultCluster.clusterName | quote }}
+        - name: CLUSTER_ICON
+          value: {{ default "🏠" .Values.microservices.budcluster.registerDefaultCluster.clusterIcon | quote }}
+        # In-cluster DNS for the Aibrix Envoy data plane. The default-cluster
+        # onboarding flow pins the Envoy Service to a stable name (`aibrix-eg-svc`
+        # in `envoy-gateway-system`, configured via EnvoyProxy.spec.provider.kubernetes.envoyService
+        # in setup_cluster.yaml). budgateway runs in-cluster and reaches Aibrix
+        # over this FQDN, so no public LoadBalancer is required.
+        - name: INGRESS_URL
+          value: {{ default "http://aibrix-eg-svc.envoy-gateway-system.svc.cluster.local" .Values.microservices.budcluster.registerDefaultCluster.ingressUrl | quote }}
+        - name: BUD_INTERNAL_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: {{ $tokenSecretName }}
+              key: token
+        - name: NAMESPACE
+          value: {{ .Release.Namespace | quote }}
+        # Long-lived SA token from the kubernetes.io/service-account-token Secret
+        # — survives the Job pod's lifetime so periodic health syncs keep working.
+        - name: SA_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Release.Name }}-default-cluster-onboarder-token
+              key: token
+        - name: SA_CA_CRT
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Release.Name }}-default-cluster-onboarder-token
+              key: ca.crt
+        command: ["/bin/sh", "-c"]
+        args:
+        - |
+          set -eu
+          NS="${NAMESPACE}"
+          TOKEN="${SA_TOKEN}"
+          CA_B64="$(printf '%s' "${SA_CA_CRT}" | base64 -w 0 2>/dev/null || printf '%s' "${SA_CA_CRT}" | base64 | tr -d '\n')"
+          API="https://${KUBERNETES_SERVICE_HOST}:${KUBERNETES_SERVICE_PORT_HTTPS:-${KUBERNETES_SERVICE_PORT}}"
+
+          KUBECONFIG_PATH="$(mktemp)"
+          cat > "${KUBECONFIG_PATH}" <<EOF
+          apiVersion: v1
+          kind: Config
+          clusters:
+          - name: in-cluster
+            cluster:
+              server: ${API}
+              certificate-authority-data: ${CA_B64}
+          users:
+          - name: bud-default-onboarder
+            user:
+              token: ${TOKEN}
+          contexts:
+          - name: in-cluster
+            context:
+              cluster: in-cluster
+              user: bud-default-onboarder
+              namespace: ${NS}
+          current-context: in-cluster
+          EOF
+
+          # Wait for budapp to be reachable (deployment + Dapr sidecar startup).
+          echo "Waiting for budapp at ${BUDAPP_URL} ..."
+          for i in $(seq 1 60); do
+            if curl -fsS -o /dev/null "${BUDAPP_URL}/health" 2>/dev/null \
+               || curl -fsS -o /dev/null "${BUDAPP_URL}/" 2>/dev/null; then
+              break
+            fi
+            sleep 5
+          done
+
+          echo "Posting in-cluster kubeconfig to budapp ..."
+          HTTP_CODE="$(curl -sS -o /tmp/resp.json -w '%{http_code}' \
+            -X POST "${BUDAPP_URL}/clusters/_internal/register-default" \
+            -H "X-Bud-Internal-Token: ${BUD_INTERNAL_TOKEN}" \
+            -F "name=${CLUSTER_NAME}" \
+            -F "icon=${CLUSTER_ICON}" \
+            -F "ingress_url=${INGRESS_URL}" \
+            -F "configuration_file=@${KUBECONFIG_PATH};type=application/yaml;filename=in-cluster.yaml")"
+          echo "HTTP ${HTTP_CODE}"
+          cat /tmp/resp.json || true
+          echo
+          # 200 OK = registered or already-registered (idempotent on the server side)
+          if [ "${HTTP_CODE}" = "200" ]; then
+            exit 0
+          fi
+          exit 1
+{{- end }}

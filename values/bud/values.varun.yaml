@@ -1,0 +1,230 @@
+global:
+    ingress:
+        hosts:
+            root: varun.bud.studio
+
+# disable keel
+deploymentAnnotations: null
+
+imagePullPolicy: Always
+
+microservices:
+    budmodel:
+        enabled: false
+    buddoc:
+        enabled: false
+        image: registry.bud.studio/runtime/buddoc:nightly
+    budadmin:
+        image: registry.bud.studio/runtime/budadmin:nightly
+    budapp:
+        image: registry.bud.studio/runtime/budapp:nightly
+        env:
+            # Reuse the shared bud-dev Keycloak as the common IdP.
+            # Must be the public hostname — the browser-facing /authorize
+            # URL is built from this, and the in-cluster hostname is not
+            # resolvable from the user's browser.
+            KEYCLOAK_SERVER_URL: "https://auth.bud.studio/"
+    budgateway:
+        image: registry.bud.studio/runtime/budgateway:nightly
+        resources:
+            limits:
+                cpu: 500m
+                memory: 1024Mi
+            requests:
+                cpu: 250m
+                memory: 512Mi
+    budsim:
+        image: registry.bud.studio/runtime/budsim:nightly
+        env:
+            SKIP_MASTER_NODE_FOR_CPU: "false"
+            # Volume is mounted at /data/models-registry by the chart, but the
+            # env that budsim's AppConfig requires isn't set by the template
+            # (bud-dev sets it via values); without it budsim crashes on a
+            # pydantic "MODEL_REGISTRY_DIR Field required" validation error.
+            MODEL_REGISTRY_DIR: /data/models-registry
+    budcluster:
+        enabled: false
+        image: registry.bud.studio/runtime/budcluster:nightly
+        env:
+            OTEL_COLLECTOR_ENDPOINT: "http://{{ $.Release.Name }}-otel-collector:4318"
+            SKIP_MASTER_NODE_FOR_CPU: "false"
+    askbud:
+        enabled: false
+        image: registry.bud.studio/runtime/askbud:nightly
+    budpipeline:
+        enabled: false
+        image: registry.bud.studio/runtime/budpipeline:nightly
+    budmetrics:
+        image: registry.bud.studio/runtime/budmetrics:nightly
+    budusecases:
+        enabled: false
+        image: registry.bud.studio/runtime/budusecases:nightly
+    mcpgateway:
+        # :latest ships the bundled connector catalog (mcp-catalog.yml, 90
+        # servers) that the dashboard's connector list reads; :nightly does
+        # not, so on :nightly the connector list is empty. Matches ditto.
+        # NOTE: :latest's readiness probe expects the DB named mcpfoundry_<dev>,
+        # so the postgresql.databases.mcpgateway.name below is mcpfoundry_varun.
+        image: registry.bud.studio/runtime/mcpgateway:latest
+        sso:
+            keycloakBaseUrl: "https://auth.bud.studio"
+        env:
+            # Chart hardcodes SSO_AUTO_CREATE_USERS=false; this trailing env
+            # override wins (last duplicate wins). Without it, SSO users aren't
+            # provisioned into mcpfoundry_varun and the connector/registry list
+            # 401s with "User not found". Matches jithin.
+            SSO_AUTO_CREATE_USERS: "true"
+        resources:
+            limits:
+                cpu: 500m
+                memory: 1024Mi
+            requests:
+                cpu: 250m
+                memory: 512Mi
+    budprompt:
+        image: registry.bud.studio/runtime/budprompt:nightly
+        env:
+            CODE_INTERPRETER_BASE_URL: "http://budcodeinterpreter:9088"
+    budplayground:
+        enabled: false
+    budcustomer:
+        enabled: false
+    budeval:
+        enabled: false
+    budcodeinterpreter:
+        enabled: false
+    budsentinel:
+        enabled: false
+    budnotify:
+        image: registry.bud.studio/runtime/budnotify:nightly
+    semanticRouter:
+        enabled: false
+    global:
+        env:
+            LOG_LEVEL: DEBUG
+
+storage:
+    budmodelRegistry:
+        className: "openebs-lvm"
+    budmodelAddDir:
+        className: "openebs-lvm"
+    budevalDataset:
+        className: "openebs-lvm"
+    budappStaticDir:
+        className: "openebs-lvm"
+
+prometheus:
+    server:
+        persistentVolume:
+            storageClass: "openebs-lvm"
+
+# Logical isolation from bud-dev/ditto/jithin: varun shares the same shared
+# postgres/kafka/valkey/clickhouse/mongodb/rustfs servers but uses
+# disjoint database names, topic names, valkey DB indices, and S3 buckets.
+externalServices:
+    # Canonical OIDC issuer for budapp/budnotify. Default is the in-cluster
+    # http://auth.bud.lan, but that hostname isn't resolvable from the user's
+    # browser — the BFF builds the browser-facing /authorize redirect from
+    # this, so it must be the public shared Keycloak hostname.
+    oidc:
+        url: "https://auth.bud.studio/realms/bud-keycloak"
+    s3:
+        endpoint: "rustfs.rustfs:9000"
+        buckets:
+            modelRegistry: "bud-models-registry-varun"
+            modelInfo: "bud-model-info-varun"
+            novu: "bud-novu-varun"
+    mongodb:
+        endpoint: "mongodb-rs0.mongodb:27017"
+        databases:
+            novu: "bud_novu_varun"
+    valkey:
+        host: "valkey-master.valkey"
+        port: 6379
+        # bud-dev occupies 3-10, ditto occupies 0,1,2,11-15, jithin occupies
+        # 16-23. varun uses the 24-31 block, available after raising the shared
+        # Valkey to 32 DBs (see infra/charts/valkey/values.budruntime.yaml).
+        databases:
+            config_store: 24
+            state_store: 25
+            novu: 26
+            budgateway: 27
+            mcpgateway: 28
+            budprompt: 29
+            global: 30
+            onyx: 31
+    clickhouse:
+        host: "clickhouse-clickhouse.clickhouse"
+        port: 9000
+        databases:
+            budeval: "bud_eval_varun"
+            budgateway: "bud_gateway_varun"
+            budmetrics: "metrics_varun"
+    kafka:
+        endpoint: "kafka-kafka-brokers.kafka:9092"
+        topics:
+            pubsub: "bud_pubsub_varun"
+            budgateway: "bud_gateway_varun"
+    postgresql:
+        host: "pooler-rw.postgres"
+        port: 5432
+        databases:
+            # Reuse bud-dev's keycloak2 DB (shared IdP); varun-keycloak is disabled below.
+            keycloak:
+                name: "keycloak2"
+            budask:
+                name: "budask_varun"
+            budapp:
+                name: "budapp_varun"
+            budcluster:
+                name: "budcluster_varun"
+            budmetrics:
+                name: "budmetrics_varun"
+            budmodel:
+                name: "budmodel_varun"
+            budsim:
+                name: "budsim_varun"
+            budeval:
+                name: "budeval_varun"
+            buddoc:
+                name: "buddoc_varun"
+            budprompt:
+                name: "budprompt_varun"
+            mcpgateway:
+                # mcpfoundry_* — the :latest mcpgateway image's readiness probe
+                # and app expect this name (not mcpgateway_<dev>).
+                name: "mcpfoundry_varun"
+            budpipeline:
+                name: "budpipeline_varun"
+            onyx:
+                name: "onyx_varun"
+
+# Disable the embedded Keycloak StatefulSet — varun reuses bud-dev's bud-keycloak as the common IdP.
+keycloak:
+    enabled: false
+
+novu:
+    api:
+        env:
+            DISABLE_USER_REGISTRATION: false
+            REDIS_DB_INDEX: "26"
+    externalDatabase:
+        host: "mongodb-rs0.mongodb"
+        database: "bud_novu_varun"
+    externalRedis:
+        host: "valkey-master.valkey"
+        existingSecret: "{{ $.Release.Name }}-novu-externalredis"
+    externalS3:
+        existingSecret: "{{ $.Release.Name }}-novu-externals3"
+        bucketName: "bud-novu-varun"
+
+# Disable prometheus-adapter to avoid ClusterRole conflict with bud-dev
+prometheus-adapter:
+    enabled: false
+onyx:
+    enabled: false
+    ingress:
+        hosts:
+            root: varun.bud.studio
+    global:
+        version: "nightly"

@@ -1,0 +1,90 @@
+{{- if (default .Values.microservices.budnotify.enabled false) }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-budnotify
+  annotations:
+    {{- range $key, $value := .Values.deploymentAnnotations }}
+    {{ $key }}: {{ $value | quote }}
+    {{- end }}
+spec:
+  {{- if not (and .Values.microservices.budnotify.autoscaling .Values.microservices.budnotify.autoscaling.enabled) }}
+  replicas: 1
+  {{- end }}
+  selector:
+    matchLabels:
+      app: {{ .Release.Name }}-budnotify
+  template:
+    metadata:
+      labels:
+        app: {{ .Release.Name }}-budnotify
+      annotations:
+        dapr.io/enabled: "true"
+        dapr.io/app-id: {{ .Values.microservices.budnotify.daprid }}
+        dapr.io/app-port: "3000"
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- $nodeSelector := include "bud.nodeSelector" (dict "service" .Values.microservices.budnotify "global" .Values.global "context" $) }}
+      {{- if $nodeSelector }}
+      nodeSelector:
+        {{- $nodeSelector | nindent 8 }}
+      {{- end }}
+      {{- $affinity := include "bud.affinity" (dict "service" .Values.microservices.budnotify "global" .Values.global "context" $) }}
+      {{- if $affinity }}
+      affinity:
+        {{- $affinity | nindent 8 }}
+      {{- end }}
+      containers:
+      - name: budnotify
+        image: {{ .Values.microservices.budnotify.image }}
+        imagePullPolicy: {{ .Values.imagePullPolicy }}
+        command: ["sh", "-c", "uvicorn notify.main:app --host 0.0.0.0 --port 3000"]
+        ports:
+        - containerPort: 3000
+        env:
+        {{- $root := . }}
+        {{- range $key, $value := .Values.microservices.budnotify.env }}
+          - name: {{ $key }}
+            value: {{ tpl $value $root | quote }}
+        {{- end }}
+        envFrom:
+          - configMapRef:
+              name: {{ .Release.Name}}-bud-global
+        {{- with .Values.microservices.budnotify.resources }}
+        resources:
+          {{- toYaml . | nindent 10 }}
+        {{- end }}
+        {{- include "bud.healthProbes" (dict "port" 3000 "probes" .Values.microservices.budnotify.probes) | nindent 8 }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Release.Name }}-budnotify
+spec:
+  ports:
+  - port: 3000
+    targetPort: 3000
+  selector:
+    app: {{ .Release.Name }}-budnotify
+  type: ClusterIP
+---
+apiVersion: dapr.io/v2alpha1
+kind: Subscription
+metadata:
+  name: {{ .Release.Name }}-budnotify-pubsub-subscription
+spec:
+  topic: "{{ $.Release.Namespace }}-{{ $.Release.Name }}-{{ .Values.microservices.budnotify.pubsubTopic }}"
+  routes:
+    default: /notifications
+  pubsubname: {{ .Release.Name }}-pubsub
+  deadLetterTopic: poisonMessages
+scopes:
+  - budnotify
+{{- if and .Values.microservices.budnotify.autoscaling .Values.microservices.budnotify.autoscaling.enabled }}
+---
+{{- include "bud.hpa" (dict "serviceName" "budnotify" "Values" .Values "Release" .Release) }}
+{{- end }}
+{{ end }}

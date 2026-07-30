@@ -1,0 +1,27 @@
+{{- range $policyName, $policyValue := $.Values.policy }}
+apiVersion: seaweed.seaweedfs.com/v1
+kind: S3Policy
+metadata:
+  name: {{ $policyName | quote }}
+spec:
+  seaweedRef:
+    name: seaweed
+  statements:
+    {{- toYaml $policyValue.statements | nindent 4 }}
+---
+apiVersion: seaweed.seaweedfs.com/v1
+kind: S3PolicyBinding
+metadata:
+  name: {{ $policyName | quote }}
+spec:
+  seaweedRef:
+    name: seaweed
+  policyRef:
+    name: {{ $policyName | quote }}
+  subjects:
+  {{- range $identity := $policyValue.identities }}
+    - kind: S3Identity
+      name: {{ $identity | quote }}
+  {{- end }}
+---
+{{- end }}

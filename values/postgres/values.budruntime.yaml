@@ -1,0 +1,53 @@
+users:
+  seaweedfs:
+    password: "seaweedfs"
+    databases:
+      - seaweedfs
+  keycloak:
+    password: "keycloak"
+    databases:
+      - keycloak
+  bud:
+    password: "bud"
+    databases:
+      - budask
+      - budapp
+      - budcluster
+      - budmetrics
+      - budmodel
+      - budsim
+      - budeval
+      - budevent
+      - buddoc
+      - budprompt
+      - budcodeinterpreter
+      - mcpgateway
+      - budpipeline
+      - onyx
+
+poolers:
+  pooler-rw-txn:
+    instances: 2
+    type: rw
+    pgbouncer:
+      poolMode: transaction
+      parameters:
+        max_client_conn: "1000"
+        server_idle_timeout: "120"
+        log_connections: "0"
+        log_disconnections: "0"
+    template:
+      metadata:
+        labels:
+          app: pooler-txn
+      spec:
+        containers: []
+        affinity:
+          podAntiAffinity:
+            preferredDuringSchedulingIgnoredDuringExecution:
+              - podAffinityTerm:
+                  topologyKey: kubernetes.io/hostname
+                  labelSelector:
+                    matchLabels:
+                      app: pooler-txn
+                weight: 100

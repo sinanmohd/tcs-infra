@@ -1,0 +1,36 @@
+instances: 3
+storageClass: ""
+size: "16Gi"
+
+users: {}
+
+poolers:
+  pooler-rw:
+    instances: 2
+    type: rw
+    pgbouncer:
+      poolMode: session
+      parameters:
+        max_client_conn: "1000"
+        log_connections: "0"
+        log_disconnections: "0"
+    template:
+      metadata:
+        labels:
+          app: pooler
+      spec:
+        containers: []
+        affinity:
+          podAntiAffinity:
+            preferredDuringSchedulingIgnoredDuringExecution:
+              - podAffinityTerm:
+                  topologyKey: kubernetes.io/hostname
+                  labelSelector:
+                    matchLabels:
+                      app: pooler
+                weight: 100
+
+cloudnative-pg:
+  enabled: true
+  config:
+    clusterWide: false

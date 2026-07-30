@@ -1,0 +1,30 @@
+ingress:
+  https: true
+  host: auth.pnap.bud-demo.com
+
+realms:
+  keycloak-bud-keycloak-realm:
+    clients:
+      budadmin-web:
+        attributes:
+          post.logout.redirect.uris: https://admin.pnap.bud-demo.com
+        redirectUris:
+          - https://app.pnap.bud-demo.com/auth/redirect/callback
+      budcustomer-web:
+        attributes:
+          post.logout.redirect.uris: https://admin.pnap.bud-demo.com##https://customer.pnap.bud-demo.com##https://playground.pnap.bud-demo.com
+        redirectUris:
+          - https://app.pnap.bud-demo.com/auth/redirect/callback
+          # Customer-app root: allow-lists KEYCLOAK_CUSTOMER_ACTION_REDIRECT_URI so a CLIENT
+          # user's invite/reset "set password" flow can redirect into the customer portal.
+          - https://customer.pnap.bud-demo.com/*
+      budplayground-web:
+        attributes:
+          post.logout.redirect.uris: https://playground.pnap.bud-demo.com
+        redirectUris:
+          - https://app.pnap.bud-demo.com/auth/redirect/callback
+      mcp-gateway:
+        attributes:
+          post.logout.redirect.uris: https://admin.pnap.bud-demo.com##https://customer.pnap.bud-demo.com##https://playground.pnap.bud-demo.com
+        redirectUris:
+          - https://app.pnap.bud-demo.com/auth/redirect/callback

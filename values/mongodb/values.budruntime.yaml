@@ -1,0 +1,7 @@
+users:
+  bud_novu:
+    db: bud_novu
+    password: bud_novu
+    roles:
+      - name: dbOwner
+        db: bud_novu

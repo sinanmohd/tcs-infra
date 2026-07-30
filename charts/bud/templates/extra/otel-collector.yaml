@@ -1,0 +1,327 @@
+{{- if .Values.otelCollector.enabled }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Release.Name }}-otel-collector-config
+data:
+  otel-collector-config.yaml: |
+    receivers:
+      otlp:
+        protocols:
+          grpc:
+            endpoint: 0.0.0.0:4317
+          http:
+            endpoint: 0.0.0.0:4318
+
+    processors:
+      batch:
+        send_batch_size: {{ .Values.otelCollector.batchSize | default 10000 }}
+        timeout: {{ .Values.otelCollector.batchTimeout | default "10s" }}
+
+      batch/realtime:
+        send_batch_size: {{ .Values.otelCollector.realtime.batchSize | default 10000 }}
+        timeout: {{ .Values.otelCollector.realtime.batchTimeout | default "2s" }}
+
+      # Group spans by TraceId before ClickHouse INSERT — ensures cross-service
+      # spans arrive together for MV LEFT JOIN reliability
+      groupbytrace:
+        wait_duration: {{ .Values.otelCollector.groupByTrace.waitDuration | default "5s" }}
+        num_traces: {{ .Values.otelCollector.groupByTrace.numTraces | default 1000000 }}
+        num_workers: {{ .Values.otelCollector.groupByTrace.numWorkers | default 2 }}
+
+      memory_limiter:
+        check_interval: 1s
+        limit_mib: {{ .Values.otelCollector.memoryLimit | default 2048 }}
+        spike_limit_mib: {{ .Values.otelCollector.memorySpikeLimit | default 512 }}
+
+      resource:
+        attributes:
+          # OTel semconv: fixed logical namespace for all bud services. This is
+          # the service.namespace resource attr (NOT the k8s namespace) and is
+          # what external trace viewers group bud services under.
+          - key: service.namespace
+            value: bud
+            action: upsert
+          # OTel semconv-native key (deployment.environment was renamed to
+          # deployment.environment.name). Sourced from the helm `environment`
+          # value so Tempo/Jaeger can filter by env.
+          - key: deployment.environment.name
+            value: {{ .Values.environment | default "dev" }}
+            action: upsert
+
+      {{- if .Values.otelCollector.externalExport.enabled }}
+      # EXTERNAL EGRESS SCRUB — runs ONLY on the traces/external pipeline.
+      # Deletes message content + request/response header attributes before
+      # spans leave the cluster for the external OTLP sink (Tempo). The
+      # ClickHouse cold path keeps these attrs for Phase-2 InferenceFact.
+      transform/external_scrub:
+        error_mode: ignore
+        trace_statements:
+          - context: span
+            statements:
+              - delete_key(attributes, "gen_ai.input.messages")
+              - delete_key(attributes, "gen_ai.output.messages")
+              - delete_key(attributes, "gen_ai.system.instructions")
+              # Drop any request/response header attributes (auth tokens,
+              # api keys, cookies leak through these). Matches keys that
+              # contain "header" anywhere, e.g. http.request.header.*,
+              # http.response.header.*, gen_ai.request.headers.
+              - delete_matching_keys(attributes, ".*[Hh]eader.*")
+      # Drop the internal-only `gateway_analytics` envelope span from the EXTERNAL
+      # view. After the Phase-1 span refactor it is a childless sibling of the HTTP
+      # SERVER root (it exists for the internal ClickHouse analytics path + bud UI),
+      # so dropping it on egress gives external viewers (Tempo/Jaeger) a single
+      # SERVER-rooted semconv tree with no orphaned children. Kept on the ClickHouse
+      # cold path for the bud UI and Phase-2 materialized views.
+      filter/external_internal:
+        error_mode: ignore
+        traces:
+          span:
+            - 'name == "gateway_analytics"'
+      {{- end }}
+
+    exporters:
+      clickhouse:
+        endpoint: tcp://{{ $.Values.externalServices.clickhouse.host }}:{{ $.Values.externalServices.clickhouse.port }}
+        database: {{ $.Values.externalServices.clickhouse.databases.budmetrics | quote }}
+        create_schema: false
+        ttl: {{ .Values.otelCollector.clickhouse.ttl | default "2160h" }}
+        logs_table_name: otel_logs
+        traces_table_name: otel_traces
+        metrics_table_name: otel_metrics
+        username: {{ $.Values.externalServices.clickhouse.auth.username | quote }}
+        password: {{ $.Values.externalServices.clickhouse.auth.password | quote }}
+        timeout: 30s
+        retry_on_failure:
+          enabled: true
+          initial_interval: 5s
+          max_interval: 30s
+          max_elapsed_time: 300s
+
+      {{- if .Values.otelCollector.externalExport.enabled }}
+      # EXTERNAL OTLP sink — the LGTM stack's Tempo distributor. Spans reach
+      # this only via the traces/external pipeline, AFTER content scrubbing.
+      otlp/external:
+        endpoint: {{ .Values.otelCollector.externalExport.endpoint | quote }}
+        tls:
+          insecure: {{ .Values.otelCollector.externalExport.tls.insecure | default true }}
+        {{- with .Values.otelCollector.externalExport.headers }}
+        headers:
+          {{- toYaml . | nindent 10 }}
+        {{- end }}
+        retry_on_failure:
+          enabled: true
+          initial_interval: 5s
+          max_interval: 30s
+          max_elapsed_time: 120s
+      {{- end }}
+
+      # Debug exporter for troubleshooting
+      debug:
+        verbosity: detailed
+        sampling_initial: 5
+        sampling_thereafter: 200
+
+      # Realtime exporter for hot path streaming to BudNotify
+      otlphttp/realtime:
+        encoding: json
+        endpoint: http://{{ .Release.Name }}-budnotify:3000
+        traces_endpoint: http://{{ .Release.Name }}-budnotify:3000/realtime/ingest/otlp
+        timeout: 2s
+        compression: none
+
+    extensions:
+      health_check:
+        endpoint: 0.0.0.0:13133
+
+    service:
+      pipelines:
+        metrics:
+          receivers: [otlp]
+          processors: [memory_limiter, batch, resource]
+          exporters: [clickhouse{{ if .Values.otelCollector.debug }}, debug{{ end }}]
+
+        # Cold path: traces to ClickHouse for persistence
+        traces:
+          receivers: [otlp]
+          processors: [memory_limiter, groupbytrace, batch, resource]
+          exporters: [clickhouse{{ if .Values.otelCollector.debug }}, debug{{ end }}]
+
+        {{- if .Values.otelCollector.externalExport.enabled }}
+        # External path: traces to the LGTM/Tempo OTLP sink for cross-service
+        # trace viewing. Content + header attrs are scrubbed before egress.
+        # Independent of the ClickHouse cold path (which keeps full content).
+        traces/external:
+          receivers: [otlp]
+          processors: [memory_limiter, batch, resource, transform/external_scrub, filter/external_internal]
+          exporters: [otlp/external{{ if .Values.otelCollector.debug }}, debug{{ end }}]
+        {{- end }}
+
+        # Hot path: realtime traces to BudNotify for live streaming
+        traces/realtime:
+          receivers: [otlp]
+          processors: [batch/realtime]
+          exporters: [otlphttp/realtime]
+
+        logs:
+          receivers: [otlp]
+          processors: [memory_limiter, batch, resource]
+          exporters: [clickhouse{{ if .Values.otelCollector.debug }}, debug{{ end }}]
+
+      extensions: [health_check]
+
+      telemetry:
+        logs:
+          level: {{ .Values.otelCollector.logLevel | default "info" }}
+        metrics:
+          level: detailed
+          readers:
+            - pull:
+                exporter:
+                  prometheus:
+                    host: 0.0.0.0
+                    port: 8888
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-otel-collector
+  labels:
+    app: {{ .Release.Name }}-otel-collector
+    component: observability
+spec:
+  replicas: {{ .Values.otelCollector.replicas | default 1 }}
+  selector:
+    matchLabels:
+      app: {{ .Release.Name }}-otel-collector
+  template:
+    metadata:
+      labels:
+        app: {{ .Release.Name }}-otel-collector
+        component: observability
+      annotations:
+        checksum/config: {{ .Values.otelCollector | toYaml | sha256sum }}
+    spec:
+      serviceAccountName: {{ .Release.Name }}-otel-collector
+      {{- with .Values.otelCollector.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.otelCollector.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+      - name: otel-collector
+        image: {{ .Values.otelCollector.image.repository }}:{{ .Values.otelCollector.image.tag }}
+        imagePullPolicy: {{ .Values.imagePullPolicy }}
+        command:
+          - "/otelcol-contrib"
+          - "--config=/conf/otel-collector-config.yaml"
+        ports:
+        - name: otlp-grpc
+          containerPort: 4317
+          protocol: TCP
+        - name: otlp-http
+          containerPort: 4318
+          protocol: TCP
+        - name: metrics
+          containerPort: 8888
+          protocol: TCP
+        volumeMounts:
+        - name: otel-collector-config
+          mountPath: /conf
+        env:
+        - name: GOGC
+          value: "80"
+        resources:
+          limits:
+            memory: {{ .Values.otelCollector.resources.limits.memory | default "2Gi" }}
+            cpu: {{ .Values.otelCollector.resources.limits.cpu | default "1000m" }}
+          requests:
+            memory: {{ .Values.otelCollector.resources.requests.memory | default "512Mi" }}
+            cpu: {{ .Values.otelCollector.resources.requests.cpu | default "100m" }}
+        livenessProbe:
+          httpGet:
+            path: /
+            port: 13133
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /
+            port: 13133
+          initialDelaySeconds: 10
+          periodSeconds: 5
+      volumes:
+      - name: otel-collector-config
+        configMap:
+          name: {{ .Release.Name }}-otel-collector-config
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Release.Name }}-otel-collector
+  labels:
+    app: {{ .Release.Name }}-otel-collector
+    component: observability
+spec:
+  type: ClusterIP
+  ports:
+  - name: otlp-grpc
+    port: 4317
+    targetPort: 4317
+    protocol: TCP
+  - name: otlp-http
+    port: 4318
+    targetPort: 4318
+    protocol: TCP
+  - name: metrics
+    port: 8888
+    targetPort: 8888
+    protocol: TCP
+  selector:
+    app: {{ .Release.Name }}-otel-collector
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ .Release.Name }}-otel-collector
+  labels:
+    app: {{ .Release.Name }}-otel-collector
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ .Release.Name }}-otel-collector
+rules:
+- apiGroups: [""]
+  resources:
+  - nodes
+  - nodes/proxy
+  - services
+  - endpoints
+  - pods
+  verbs: ["get", "list", "watch"]
+- apiGroups:
+  - networking.k8s.io
+  resources:
+  - ingresses
+  verbs: ["get", "list", "watch"]
+- nonResourceURLs: ["/metrics"]
+  verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ .Release.Name }}-otel-collector
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ .Release.Name }}-otel-collector
+subjects:
+- kind: ServiceAccount
+  name: {{ .Release.Name }}-otel-collector
+  namespace: {{ .Release.Namespace }}
+{{- end }}

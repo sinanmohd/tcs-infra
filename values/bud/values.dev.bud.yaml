@@ -1,0 +1,135 @@
+ingress:
+    https: internal
+global:
+    ingress:
+        hosts:
+            root: "dev.bud.studio"
+
+imagePullPolicy: "Always"
+deploymentAnnotations:
+    keel.sh/policy: force
+    keel.sh/trigger: poll
+    keel.sh/match-tag: true
+    keel.sh/pollSchedule: "@every 1m"
+
+storage:
+    budmodelRegistry:
+        className: "openebs-lvm"
+        size: 160Gi
+    budmodelAddDir:
+        className: "openebs-lvm"
+    budevalDataset:
+        className: "openebs-lvm"
+    budappStaticDir:
+        className: "openebs-lvm"
+prometheus:
+    server:
+        persistentVolume:
+            storageClass: "openebs-lvm"
+
+externalServices:
+    oidc:
+        url: "https://auth.bud.studio/realms/bud-keycloak"
+    s3:
+        endpoint: "s3.bud.studio"
+        secure: true
+
+microservices:
+    budadmin:
+        env:
+            NEXT_PUBLIC_ENABLE_DEV_MODE: "true"
+        image: registry.bud.studio/runtime/budadmin:nightly
+    budcustomer:
+        image: registry.bud.studio/runtime/budcustomer:nightly
+    budplayground:
+        image: registry.bud.studio/runtime/budplayground:nightly
+    mcpgateway:
+        image: registry.bud.studio/runtime/mcpgateway:nightly
+    budgateway:
+        image: registry.bud.studio/runtime/budgateway:nightly
+        resources:
+            limits:
+                cpu: 500m
+                memory: 2Gi
+            requests:
+                cpu: 250m
+                memory: 1Gi
+    askbud:
+        image: registry.bud.studio/runtime/askbud:nightly
+    budapp:
+        image: registry.bud.studio/runtime/budapp:nightly
+        probes:
+            livenessTimeoutSeconds: 10
+            livenessFailureThreshold: 6
+        env:
+            RATE_LIMIT_ENABLED: "false"
+        redirectFlow:
+            clientsByHost:
+                budadmin:
+                    hosts:
+                        - '{{ include "bud.ingress.hosts.budadmin" . }}'
+                        - localhost:3000
+                    allowedReturnUrlOrigins:
+                        - '{{ include "bud.ingress.url.budadmin" . }}'
+                        - http://localhost:3000
+                budcustomer:
+                    hosts:
+                        - '{{ include "bud.ingress.hosts.budcustomer" . }}'
+                    allowedReturnUrlOrigins:
+                        - '{{ include "bud.ingress.url.budcustomer" . }}'
+                budplayground:
+                    hosts:
+                        - '{{ include "bud.ingress.hosts.budplayground" . }}'
+                        - localhost:3001
+                    allowedReturnUrlOrigins:
+                        - '{{ include "bud.ingress.url.budplayground" . }}'
+                        - http://localhost:3001
+    budcluster:
+        image: registry.bud.studio/runtime/budcluster:nightly
+        env:
+            SKIP_MASTER_NODE_FOR_CPU: "false"
+    budmetrics:
+        image: registry.bud.studio/runtime/budmetrics:nightly
+    budmodel:
+        image: registry.bud.studio/runtime/budmodel:nightly
+        preflight:
+            enabled: true
+            registryMaxSize: 150
+            capacityProvider: "auto"
+    budeval:
+        enabled: true
+        image: registry.bud.studio/runtime/budeval:nightly
+    budsim:
+        image: registry.bud.studio/runtime/budsim:nightly
+        env:
+            SKIP_MASTER_NODE_FOR_CPU: "false"
+    buddoc:
+        image: registry.bud.studio/runtime/buddoc:nightly
+    budnotify:
+        image: registry.bud.studio/runtime/budnotify:nightly
+    budprompt:
+        image: registry.bud.studio/runtime/budprompt:nightly
+        env:
+            LOG_LEVEL: DEBUG
+        autoscaling:
+            enabled: true
+            minReplicas: 1
+            maxReplicas: 10
+            prometheusMetrics:
+                enabled: true
+    budevent:
+        image: registry.bud.studio/runtime/budevent:nightly
+        autoscaling:
+            enabled: true
+            minReplicas: 2
+            maxReplicas: 20
+    budcodeinterpreter:
+        image: registry.bud.studio/runtime/budcodeinterpreter:nightly
+        env:
+            E2B_DOMAIN: http://164.52.200.72:3000
+            E2B_SANDBOX_URL: http://164.52.200.72:3002
+            CODE_INTERPRETER_DEFAULT_TEMPLATE: code-interpreter-2g-2c
+            OTEL_SDK_DISABLED: "false"
+            OTEL_EXPORTER_OTLP_ENDPOINT: "http://{{ $.Release.Name }}-otel-collector:4318"
+    budpipeline:
+        image: registry.bud.studio/runtime/budpipeline:nightly

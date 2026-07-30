@@ -1,0 +1,9 @@
+{{- range $name, $spec := $.Values.bundles }}
+apiVersion: trust.cert-manager.io/v1alpha1
+kind: Bundle
+metadata:
+  name: {{ $name | quote }}
+spec:
+  {{- $spec | toYaml | nindent 2 }}
+---
+{{- end }}

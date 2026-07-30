@@ -1,0 +1,11 @@
+ingress:
+  enabled: true
+  host: registry.bud.studio
+
+harbor:
+  externalURL: https://registry.bud.studio
+  persistence:
+    imageChartStorage:
+      s3:
+        regionendpoint: https://s3.bud.studio
+        secure: true

@@ -1,0 +1,4 @@
+kyverno:
+  enabled: true
+
+clusterPolicies: {}

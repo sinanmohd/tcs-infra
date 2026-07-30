@@ -1,0 +1,116 @@
+{{- if (default .Values.microservices.budcodeinterpreter.enabled false) }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name}}-budcodeinterpreter
+  annotations:
+    {{- range $key, $value := .Values.deploymentAnnotations }}
+    {{ $key }}: {{ $value | quote }}
+    {{- end }}
+spec:
+  {{- if not (and .Values.microservices.budcodeinterpreter.autoscaling .Values.microservices.budcodeinterpreter.autoscaling.enabled) }}
+  replicas: 1
+  {{- end }}
+  selector:
+    matchLabels:
+      app: {{ .Release.Name}}-budcodeinterpreter
+  template:
+    metadata:
+      labels:
+        app: {{ .Release.Name}}-budcodeinterpreter
+      annotations:
+        dapr.io/enabled: "true"
+        dapr.io/app-id: {{ .Values.microservices.budcodeinterpreter.daprid }}
+        dapr.io/app-port: "3006"
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- $nodeSelector := include "bud.nodeSelector" (dict "service" .Values.microservices.budcodeinterpreter "global" .Values.global "context" $) }}
+      {{- if $nodeSelector }}
+      nodeSelector:
+        {{- $nodeSelector | nindent 8 }}
+      {{- end }}
+      {{- $affinity := include "bud.affinity" (dict "service" .Values.microservices.budcodeinterpreter "global" .Values.global "context" $) }}
+      {{- if $affinity }}
+      affinity:
+        {{- $affinity | nindent 8 }}
+      {{- end }}
+      containers:
+      - name: {{ .Release.Name}}-budcodeinterpreter
+        image: {{ .Values.microservices.budcodeinterpreter.image }}
+        imagePullPolicy: {{ .Values.imagePullPolicy }}
+        ports:
+        - containerPort: 3006
+        env:
+          - name: PSQL_HOST
+            value: {{ $.Values.externalServices.postgresql.host | quote }}
+          - name: PSQL_PORT
+            value: {{ $.Values.externalServices.postgresql.port | quote }}
+          - name: PSQL_USER
+            value: {{ $.Values.externalServices.postgresql.databases.budcodeinterpreter.username | quote }}
+          - name: PSQL_PASSWORD
+            value: {{ $.Values.externalServices.postgresql.databases.budcodeinterpreter.password | quote }}
+          - name: PSQL_DB_NAME
+            value: {{ $.Values.externalServices.postgresql.databases.budcodeinterpreter.name | quote }}
+          # SECRETS_-prefixed mirrors for the local-env Dapr secretstore.
+          - name: SECRETS_PSQL_USER
+            value: {{ $.Values.externalServices.postgresql.databases.budcodeinterpreter.username | quote }}
+          - name: SECRETS_PSQL_PASSWORD
+            value: {{ $.Values.externalServices.postgresql.databases.budcodeinterpreter.password | quote }}
+          - name: REDIS_HOST
+            value: {{ $.Values.externalServices.valkey.host | quote }}
+          - name: REDIS_PORT
+            value: {{ $.Values.externalServices.valkey.port | quote }}
+          - name: REDIS_DB_INDEX
+            value: {{ $.Values.externalServices.valkey.databases.budcodeinterpreter | quote }}
+          - name: REDIS_PASSWORD
+            value: {{ $.Values.externalServices.valkey.password | quote }}
+          - name: SECRETS_REDIS_URI
+            value: '{{ $.Values.externalServices.valkey.host }}:{{ $.Values.externalServices.valkey.port }}'
+          - name: SECRETS_REDIS_PASSWORD
+            value: {{ $.Values.externalServices.valkey.password | quote }}
+        {{- $root := . }}
+        {{- range $key, $value := .Values.microservices.budcodeinterpreter.env }}
+          - name: {{ $key }}
+            value: {{ tpl $value $root | quote }}
+        {{- end }}
+        envFrom:
+          - configMapRef:
+              name: {{ .Release.Name}}-bud-global
+        {{- with .Values.microservices.budcodeinterpreter.resources }}
+        resources:
+          {{- toYaml . | nindent 10 }}
+        {{- end }}
+        {{- include "bud.healthProbes" (dict "port" 3006 "probes" .Values.microservices.budcodeinterpreter.probes) | nindent 8 }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Release.Name }}-budcodeinterpreter
+spec:
+  ports:
+  - port: 3006
+    targetPort: 3006
+  selector:
+    app: {{ .Release.Name }}-budcodeinterpreter
+  type: ClusterIP
+---
+apiVersion: dapr.io/v2alpha1
+kind: Subscription
+metadata:
+  name: {{ .Release.Name }}-budcodeinterpreter-pubsub-subscription
+spec:
+  topic: budCodeInterpreterMessages
+  routes:
+    default: /notifications
+  pubsubname: {{ .Release.Name }}-pubsub
+  deadLetterTopic: poisonMessages
+scopes:
+  - budcodeinterpreter
+{{- if and .Values.microservices.budcodeinterpreter.autoscaling .Values.microservices.budcodeinterpreter.autoscaling.enabled }}
+---
+{{- include "bud.hpa" (dict "serviceName" "budcodeinterpreter" "Values" .Values "Release" .Release) }}
+{{- end }}
+{{ end }}

@@ -1,0 +1,17 @@
+apiVersion: velero.io/v1
+kind: Schedule
+metadata:
+  name: cluster-objects
+spec:
+  schedule: 0 6 * * *
+  template:
+    includedNamespaces:
+    - '*'
+    excludedNamespaces:
+    - 'kube-node-lease'
+    - 'kube-public'
+    - 'kube-system'
+    includedResources:
+    - '*'
+    includeClusterResources: true
+    ttl: 168h0m0s # 1 week

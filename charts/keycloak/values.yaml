@@ -1,0 +1,23 @@
+ingress:
+  enabled: false
+  https: false
+  host: localhost
+
+postgres:
+  host: "pooler-rw.postgres"
+  port: 5432
+  username: "keycloak"
+  password: "keycloak"
+  database: "keycloak"
+
+instances: 1
+username: "admin"
+password: "keycloak"
+
+image: ""
+imagePullSecrets: []
+
+realms: {}
+
+keycloak-operator:
+  enabled: true

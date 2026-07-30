@@ -1,0 +1,230 @@
+global:
+    ingress:
+        hosts:
+            root: jithin.bud.studio
+
+# disable keel
+deploymentAnnotations: null
+
+imagePullPolicy: Always
+
+microservices:
+    budmodel:
+        enabled: false
+    buddoc:
+        enabled: false
+        image: registry.bud.studio/runtime/buddoc:nightly
+    budadmin:
+        image: registry.bud.studio/runtime/budadmin:nightly
+    budapp:
+        image: registry.bud.studio/runtime/budapp:nightly
+        env:
+            # Reuse the shared bud-dev Keycloak as the common IdP.
+            # Must be the public hostname — the browser-facing /authorize
+            # URL is built from this, and the in-cluster hostname is not
+            # resolvable from the user's browser.
+            KEYCLOAK_SERVER_URL: "https://auth.bud.studio/"
+    budgateway:
+        image: registry.bud.studio/runtime/budgateway:nightly
+        resources:
+            limits:
+                cpu: 500m
+                memory: 1024Mi
+            requests:
+                cpu: 250m
+                memory: 512Mi
+    budsim:
+        image: registry.bud.studio/runtime/budsim:nightly
+        env:
+            SKIP_MASTER_NODE_FOR_CPU: "false"
+            # Volume is mounted at /data/models-registry by the chart, but the
+            # env that budsim's AppConfig requires isn't set by the template
+            # (bud-dev sets it via values); without it budsim crashes on a
+            # pydantic "MODEL_REGISTRY_DIR Field required" validation error.
+            MODEL_REGISTRY_DIR: /data/models-registry
+    budcluster:
+        enabled: false
+        image: registry.bud.studio/runtime/budcluster:nightly
+        env:
+            OTEL_COLLECTOR_ENDPOINT: "http://{{ $.Release.Name }}-otel-collector:4318"
+            SKIP_MASTER_NODE_FOR_CPU: "false"
+    askbud:
+        enabled: false
+        image: registry.bud.studio/runtime/askbud:nightly
+    budpipeline:
+        enabled: false
+        image: registry.bud.studio/runtime/budpipeline:nightly
+    budmetrics:
+        image: registry.bud.studio/runtime/budmetrics:nightly
+    budusecases:
+        enabled: false
+        image: registry.bud.studio/runtime/budusecases:nightly
+    mcpgateway:
+        # :latest ships the bundled connector catalog (mcp-catalog.yml, 90
+        # servers) that the dashboard's connector list reads; :nightly does
+        # not, so on :nightly the connector list is empty. Matches ditto.
+        # NOTE: :latest's readiness probe expects the DB named mcpfoundry_<dev>,
+        # so the postgresql.databases.mcpgateway.name below is mcpfoundry_jithin.
+        image: registry.bud.studio/runtime/mcpgateway:latest
+        sso:
+            keycloakBaseUrl: "https://auth.bud.studio"
+        resources:
+            limits:
+                cpu: 500m
+                memory: 1024Mi
+            requests:
+                cpu: 250m
+                memory: 512Mi
+    budprompt:
+        image: registry.bud.studio/runtime/budprompt:nightly
+        env:
+            CODE_INTERPRETER_BASE_URL: "http://budcodeinterpreter:9088"
+    budplayground:
+        enabled: false
+    budcustomer:
+        enabled: false
+    budeval:
+        enabled: false
+    budcodeinterpreter:
+        enabled: false
+    budsentinel:
+        enabled: false
+    budnotify:
+        image: registry.bud.studio/runtime/budnotify:nightly
+    semanticRouter:
+        enabled: false
+    global:
+        env:
+            LOG_LEVEL: DEBUG
+
+storage:
+    budmodelRegistry:
+        className: "openebs-lvm"
+    budmodelAddDir:
+        className: "openebs-lvm"
+    budevalDataset:
+        className: "openebs-lvm"
+    budappStaticDir:
+        className: "openebs-lvm"
+
+prometheus:
+    server:
+        persistentVolume:
+            storageClass: "openebs-lvm"
+
+# Logical isolation from bud-dev/ditto: jithin shares the same shared
+# postgres/kafka/valkey/clickhouse/mongodb/rustfs servers but uses
+# disjoint database names, topic names, valkey DB indices, and S3 buckets.
+externalServices:
+    # Canonical OIDC issuer for budapp/budnotify. Default is the in-cluster
+    # http://auth.bud.lan, but that hostname isn't resolvable from the user's
+    # browser — the BFF builds the browser-facing /authorize redirect from
+    # this, so it must be the public shared Keycloak hostname.
+    oidc:
+        url: "https://auth.bud.studio/realms/bud-keycloak"
+    s3:
+        endpoint: "rustfs.rustfs:9000"
+        buckets:
+            modelRegistry: "bud-models-registry-jithin"
+            modelInfo: "bud-model-info-jithin"
+            novu: "bud-novu-jithin"
+    mongodb:
+        endpoint: "mongodb-rs0.mongodb:27017"
+        databases:
+            novu: "bud_novu_jithin"
+    valkey:
+        host: "valkey-master.valkey"
+        port: 6379
+        # bud-dev occupies 3-10, ditto occupies 0,1,2,11-15. jithin uses the
+        # 16-23 block, available after raising the shared Valkey to 32 DBs
+        # (see infra/charts/valkey/values.budruntime.yaml).
+        databases:
+            config_store: 16
+            state_store: 17
+            novu: 18
+            budgateway: 19
+            mcpgateway: 20
+            budprompt: 21
+            global: 22
+            onyx: 23
+    clickhouse:
+        host: "clickhouse-clickhouse.clickhouse"
+        port: 9000
+        # Dedicated user granted only on the *_jithin databases, provisioned by
+        # infra/charts/clickhouse/values.bud.yaml. Overrides the shared `bud`
+        # credentials from secrets.bud.yaml — bud_pde layers this file last.
+        auth:
+            username: "bud_jithin"
+            password: "bud"
+        databases:
+            budeval: "bud_eval_jithin"
+            budgateway: "bud_gateway_jithin"
+            budmetrics: "metrics_jithin"
+    kafka:
+        endpoint: "kafka-kafka-brokers.kafka:9092"
+        topics:
+            pubsub: "bud_pubsub_jithin"
+            budgateway: "bud_gateway_jithin"
+    postgresql:
+        host: "pooler-rw.postgres"
+        port: 5432
+        databases:
+            # Reuse bud-dev's keycloak2 DB (shared IdP); jithin-keycloak is disabled below.
+            keycloak:
+                name: "keycloak2"
+            budask:
+                name: "budask_jithin"
+            budapp:
+                name: "budapp_jithin"
+            budcluster:
+                name: "budcluster_jithin"
+            budmetrics:
+                name: "budmetrics_jithin"
+            budmodel:
+                name: "budmodel_jithin"
+            budsim:
+                name: "budsim_jithin"
+            budeval:
+                name: "budeval_jithin"
+            buddoc:
+                name: "buddoc_jithin"
+            budprompt:
+                name: "budprompt_jithin"
+            mcpgateway:
+                # mcpfoundry_* — the :latest mcpgateway image's readiness probe
+                # and app expect this name (not mcpgateway_<dev>).
+                name: "mcpfoundry_jithin"
+            budpipeline:
+                name: "budpipeline_jithin"
+            onyx:
+                name: "onyx_jithin"
+
+# Disable the embedded Keycloak StatefulSet — jithin reuses bud-dev's bud-keycloak as the common IdP.
+keycloak:
+    enabled: false
+
+novu:
+    api:
+        env:
+            DISABLE_USER_REGISTRATION: false
+            REDIS_DB_INDEX: "18"
+    externalDatabase:
+        host: "mongodb-rs0.mongodb"
+        database: "bud_novu_jithin"
+    externalRedis:
+        host: "valkey-master.valkey"
+        existingSecret: "{{ $.Release.Name }}-novu-externalredis"
+    externalS3:
+        existingSecret: "{{ $.Release.Name }}-novu-externals3"
+        bucketName: "bud-novu-jithin"
+
+# Disable prometheus-adapter to avoid ClusterRole conflict with bud-dev
+prometheus-adapter:
+    enabled: false
+onyx:
+    enabled: false
+    ingress:
+        hosts:
+            root: jithin.bud.studio
+    global:
+        version: "nightly"

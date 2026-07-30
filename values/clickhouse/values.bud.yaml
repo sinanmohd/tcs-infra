@@ -1,0 +1,71 @@
+storageClass: "openebs-lvm"
+size: 75Gi
+keeper:
+  storageClass: "openebs-lvm"
+
+resources:
+  requests:
+    memory: 2Gi
+  limits:
+    memory: 48Gi
+
+configuration:
+  settings:
+    max_server_memory_usage_to_ram_ratio: "0.8"
+  profiles:
+    default/max_memory_usage: "20000000000"
+    default/max_bytes_before_external_group_by: "10000000000"
+    default/max_bytes_before_external_sort: "10000000000"
+
+users:
+  signoz:
+    password: "signoz"
+    grants:
+      - SELECT(host_name, host_address, port, cluster) ON system.clusters
+      - SELECT(name, type) ON system.disks
+      - SELECT(entry, cluster, query, host, port, status, exception_code) ON
+        system.distributed_ddl_queue
+      - SELECT(host, port) ON system.zookeeper_connection
+      - SELECT(database, table, command, mutation_id, latest_fail_reason,
+        is_done) ON system.mutations
+
+      - CLUSTER ON *.*
+      - REMOTE ON *.*
+
+      - ALL ON signoz_metadata.*
+      - ALL ON signoz_analytics.*
+    databases:
+      - name: signoz_metrics
+      - name: signoz_traces
+      - name: signoz_logs
+      - name: signoz_meter
+  bud_sinan:
+    password: "bud"
+    databases:
+      - name: bud_eval_sinan
+      - name: bud_gateway_sinan
+      - name: metrics_sinan
+        extraArgs: "ENGINE = Replicated('/clickhouse/databases/{uuid}', '{shard}', '{replica}')"
+    grants:
+      - ALL ON metrics_sinan.*
+      - SELECT(path) ON system.zookeeper
+      - SELECT(cluster, replica_num) ON system.clusters
+      - SELECT(macro, substitution) ON system.macros
+
+  # Paired with externalServices.clickhouse.auth in infra/charts/bud/values.jithin.yaml.
+  # Scoped to jithin's own databases so the PDE cannot reach bud-dev's metrics.
+  bud_jithin:
+    password: "bud"
+    databases:
+      - name: bud_eval_jithin
+      - name: bud_gateway_jithin
+      - name: metrics_jithin
+        extraArgs: "ENGINE = Replicated('/clickhouse/databases/{uuid}', '{shard}', '{replica}')"
+    grants:
+      - ALL ON metrics_jithin.*
+      # Required by budmetrics' migrate_clickhouse.py:detect_replicated_mode()
+      # so its topology probe succeeds instead of falling back to "default to
+      # replicated".
+      - SELECT(path) ON system.zookeeper
+      - SELECT(cluster, replica_num) ON system.clusters
+      - SELECT(macro, substitution) ON system.macros

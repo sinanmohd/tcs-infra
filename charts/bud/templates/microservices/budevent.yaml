@@ -1,0 +1,231 @@
+{{- if (default .Values.microservices.budevent.enabled false) }}
+{{- /*
+  budevent — trigger/event ingestion + IM-bot conversational service (Rust).
+  First Rust service inside the Dapr mesh. Public webhook ingress (/events/*)
+  is provider-signature authenticated; /internal/* is Dapr/app-token gated.
+*/ -}}
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ .Release.Name }}-budevent-crypto
+  annotations:
+    # The credential-vault key must NEVER be rotated out from under stored ciphertext:
+    # losing or changing it makes every connector credential (Teams client secret, bot
+    # tokens) permanently undecryptable. Keep it across uninstall / ArgoCD prune.
+    helm.sh/resource-policy: keep
+    argocd.argoproj.io/sync-options: Prune=false
+type: Opaque
+data:
+  # 32-byte AES-256 key for budevent's credential vault. It MUST stay STABLE for the
+  # life of the stored credentials. Resolution order:
+  #   1. explicit `daprExtra.crypto.budeventCryptoKey` — REQUIRED for every deploy.
+  #      Supply a STABLE 32-byte key per-environment via SOPS (see secrets.bud.yaml /
+  #      secrets.demo.yaml). Under GitOps/ArgoCD the chart is rendered with
+  #      `helm template`, where the `lookup` below returns empty.
+  #   2. reuse an existing in-cluster secret (a convenience for plain `helm upgrade`
+  #      only — NOT reachable under ArgoCD, where `lookup` is empty).
+  # There is deliberately NO random-generation fallback: a generated key silently
+  # rotates on every `helm template`/ArgoCD sync and permanently orphans every stored
+  # connector credential. A missing key must fail the render loudly instead.
+  {{- $existing := (lookup "v1" "Secret" .Release.Namespace (printf "%s-budevent-crypto" .Release.Name)) }}
+  {{- if .Values.daprExtra.crypto.budeventCryptoKey }}
+  {{- if ne (len .Values.daprExtra.crypto.budeventCryptoKey) 32 }}
+  {{- fail "budevent: daprExtra.crypto.budeventCryptoKey must be exactly 32 bytes (AES-256)" }}
+  {{- end }}
+  crypto-key: {{ .Values.daprExtra.crypto.budeventCryptoKey | b64enc | quote }}
+  {{- else if and $existing $existing.data (hasKey $existing.data "crypto-key") }}
+  crypto-key: {{ index $existing.data "crypto-key" }}
+  {{- else }}
+  {{- fail "budevent: daprExtra.crypto.budeventCryptoKey is required (exactly 32 bytes, AES-256). Set it per-environment via the SOPS-encrypted secrets file that env loads (e.g. secrets.bud.yaml, secrets.demo.yaml). Random generation was removed because it silently rotates the credential-vault key on every render and orphans stored connector credentials." }}
+  {{- end }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-budevent
+  annotations:
+    {{- range $key, $value := .Values.deploymentAnnotations }}
+    {{ $key }}: {{ $value | quote }}
+    {{- end }}
+spec:
+  {{- if not (default false .Values.microservices.budevent.autoscaling.enabled) }}
+  replicas: {{ .Values.microservices.budevent.replicas | default 1 }}
+  {{- end }}
+  selector:
+    matchLabels:
+      app: {{ .Release.Name }}-budevent
+  template:
+    metadata:
+      labels:
+        app: {{ .Release.Name }}-budevent
+      annotations:
+        dapr.io/enabled: "true"
+        dapr.io/app-id: {{ .Values.microservices.budevent.daprid }}
+        dapr.io/app-port: "9085"
+        dapr.io/app-token-secret: "{{ .Release.Name }}-app-api-token"
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9085"
+        prometheus.io/path: "/metrics"
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- $nodeSelector := include "bud.nodeSelector" (dict "service" .Values.microservices.budevent "global" .Values.global "context" $) }}
+      {{- if $nodeSelector }}
+      nodeSelector:
+        {{- $nodeSelector | nindent 8 }}
+      {{- end }}
+      {{- $affinity := include "bud.affinity" (dict "service" .Values.microservices.budevent "global" .Values.global "context" $) }}
+      {{- if $affinity }}
+      affinity:
+        {{- $affinity | nindent 8 }}
+      {{- end }}
+      containers:
+      - name: budevent
+        image: {{ .Values.microservices.budevent.image }}
+        imagePullPolicy: {{ .Values.imagePullPolicy }}
+        # Apply migrations, then serve (mirrors the Python services' `alembic
+        # upgrade head && ...` startup slot). `budevent` is on PATH in the image.
+        command: ["sh", "-c", "budevent migrate && budevent"]
+        ports:
+        - containerPort: 9085
+        envFrom:
+          - configMapRef:
+              name: {{ .Release.Name }}-bud-global
+        env:
+          # Internal-auth token (also the value Dapr injects as dapr-api-token);
+          # gates /internal/* only — public /events/* uses provider signatures.
+          - name: APP_API_TOKEN
+            valueFrom:
+              secretKeyRef:
+                name: {{ .Release.Name }}-app-api-token
+                key: token
+          - name: BUDEVENT_CRYPTO_KEY
+            valueFrom:
+              secretKeyRef:
+                name: {{ .Release.Name }}-budevent-crypto
+                key: crypto-key
+          - name: BUDEVENT_CONFIG
+            value: "/app/config/budevent.toml"
+          - name: BUDEVENT_SERVER__PORT
+            value: "9085"
+          - name: BUDEVENT_SERVER__MAX_CONCURRENT_TURNS
+            value: {{ .Values.microservices.budevent.maxConcurrentTurns | default 2048 | quote }}
+          - name: BUDEVENT_DAPR__HTTP_PORT
+            value: "3500"
+          - name: BUDEVENT_DAPR__DISPATCH_APP_ID
+            value: "{{ .Values.microservices.budprompt.daprid }}"
+          # PostgreSQL — PSQL_* matches the house pattern used by every other bud service.
+          - name: PSQL_HOST
+            value: {{ default $.Values.externalServices.postgresql.host $.Values.microservices.budevent.psqlHost | quote }}
+          - name: PSQL_PORT
+            value: {{ $.Values.externalServices.postgresql.port | quote }}
+          - name: PSQL_USER
+            value: {{ $.Values.externalServices.postgresql.databases.budevent.username | quote }}
+          - name: PSQL_PASSWORD
+            value: {{ $.Values.externalServices.postgresql.databases.budevent.password | quote }}
+          - name: PSQL_DB_NAME
+            value: {{ $.Values.externalServices.postgresql.databases.budevent.name | quote }}
+          # Service discovery — Dapr app id of the dispatch target.
+          - name: BUDPROMPT_APP_ID
+            value: "{{ .Values.microservices.budprompt.daprid }}"
+          {{- range $key, $value := .Values.microservices.budevent.env }}
+          - name: {{ $key }}
+            value: {{ tpl (toString $value) $ | quote }}
+          {{- end }}
+        {{- with .Values.microservices.budevent.resources }}
+        resources:
+          {{- toYaml . | nindent 10 }}
+        {{- end }}
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 9085
+          initialDelaySeconds: 15
+          periodSeconds: 20
+          timeoutSeconds: {{ .Values.microservices.budevent.livenessTimeoutSeconds | default 5 }}
+          failureThreshold: {{ .Values.microservices.budevent.livenessFailureThreshold | default 5 }}
+        readinessProbe:
+          httpGet:
+            path: /ready
+            port: 9085
+          initialDelaySeconds: 5
+          periodSeconds: 10
+          timeoutSeconds: {{ .Values.microservices.budevent.readinessTimeoutSeconds | default 3 }}
+          failureThreshold: {{ .Values.microservices.budevent.readinessFailureThreshold | default 5 }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Release.Name }}-budevent
+spec:
+  ports:
+  - port: 9085
+    targetPort: 9085
+  selector:
+    app: {{ .Release.Name }}-budevent
+  type: ClusterIP
+{{- if .Values.microservices.budevent.autoscaling.enabled }}
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: {{ .Release.Name }}-budevent
+  labels:
+    app: {{ .Release.Name }}-budevent
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: {{ .Release.Name }}-budevent
+  minReplicas: {{ .Values.microservices.budevent.autoscaling.minReplicas | default 1 }}
+  maxReplicas: {{ .Values.microservices.budevent.autoscaling.maxReplicas | default 5 }}
+  # ContainerResource scopes to the budevent container; a pod-wide Resource metric reports <unknown> because the daprd sidecar has no requests.
+  metrics:
+    {{- if .Values.microservices.budevent.autoscaling.targetCPUUtilizationPercentage }}
+    - type: ContainerResource
+      containerResource:
+        name: cpu
+        container: budevent
+        target:
+          type: Utilization
+          averageUtilization: {{ .Values.microservices.budevent.autoscaling.targetCPUUtilizationPercentage }}
+    {{- end }}
+    {{- if .Values.microservices.budevent.autoscaling.targetMemoryUtilizationPercentage }}
+    - type: ContainerResource
+      containerResource:
+        name: memory
+        container: budevent
+        target:
+          type: Utilization
+          averageUtilization: {{ .Values.microservices.budevent.autoscaling.targetMemoryUtilizationPercentage }}
+    {{- end }}
+    {{- if .Values.microservices.budevent.autoscaling.targetTurnsInFlight }}
+    - type: Pods
+      pods:
+        metric:
+          name: budevent_turns_in_flight
+        target:
+          type: AverageValue
+          averageValue: {{ .Values.microservices.budevent.autoscaling.targetTurnsInFlight | quote }}
+    {{- end }}
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: {{ .Values.microservices.budevent.autoscaling.scaleDownStabilizationSeconds | default 300 }}
+      policies:
+        - type: Percent
+          value: 50
+          periodSeconds: 60
+    scaleUp:
+      stabilizationWindowSeconds: {{ .Values.microservices.budevent.autoscaling.scaleUpStabilizationSeconds | default 0 }}
+      policies:
+        - type: Percent
+          value: 100
+          periodSeconds: 15
+        - type: Pods
+          value: 2
+          periodSeconds: 15
+      selectPolicy: Max
+{{- end }}
+{{ end }}

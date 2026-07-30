@@ -1,0 +1,6 @@
+persistence:
+  storageClass: "openebs-lvm"
+config:
+  extraConfig:
+    - "databases 40"
+    - "notify-keyspace-events KEA"

@@ -1,0 +1,4 @@
+ingress:
+  enabled: true
+  https: true
+  host: s3.intel.bud-demo.com

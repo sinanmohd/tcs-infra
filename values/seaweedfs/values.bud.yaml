@@ -1,0 +1,94 @@
+ingress:
+  enabled: true
+  https: true
+  host: s3.bud.studio
+
+volumeSizeLimitMB: 5000
+defaultReplication: "100"
+storageClassName: "openebs-lvm"
+
+volumeTopology:
+  bud-hetzner-ax52-0:
+    dataCenter: "dc0"
+    nodeSelector:
+      kubernetes.io/hostname: "bud-hetzner-ax52-0"
+    storageClassName: "openebs-lvm"
+    rack: "rack1"
+    requests:
+      storage: 350Gi
+    replicas: 2
+    maxVolumeCounts: 150
+    minFreeSpacePercent: 10
+  bud-hetzner-ax52-1:
+    dataCenter: "dc1"
+    nodeSelector:
+      kubernetes.io/hostname: "bud-hetzner-ax52-1"
+    storageClassName: "openebs-lvm"
+    replicas: 2
+    requests:
+      storage: 350Gi
+    rack: "rack1"
+    maxVolumeCounts: 150
+    minFreeSpacePercent: 10
+  bud-hetzner-ax52-2:
+    dataCenter: "dc2"
+    storageClassName: "openebs-lvm"
+    nodeSelector:
+      kubernetes.io/hostname: "bud-hetzner-ax52-2"
+    replicas: 2
+    requests:
+      storage: 350Gi
+    rack: "rack1"
+    maxVolumeCounts: 150
+    minFreeSpacePercent: 10
+
+policy:
+  opentofu:
+    identities:
+      - opentofu
+    statements:
+      - effect: Allow
+        actions:
+          - "s3:*"
+        resources:
+          - "opentofu"
+          - "opentofu/*"
+  harbor:
+    identities:
+      - harbor
+    statements:
+      - effect: Allow
+        actions:
+          - "s3:*"
+        resources:
+          - "harbor"
+          - "harbor/*"
+
+buckets:
+  harbor:
+    reclaimPolicy: Delete
+    versioning: "Off"
+    objectLock: false
+    anonymousRead: false
+    quota:
+      size: 512Gi
+      enforce: true
+  opentofu:
+    reclaimPolicy: Retain
+    versioning: Enabled
+    objectLock: false
+    anonymousRead: false
+    quota:
+      size: 128Mi
+      enforce: true
+  bud-models-registry:
+    quota:
+      size: 300Gi
+  bud-terraform-state:
+    reclaimPolicy: Retain
+    versioning: Enabled
+    objectLock: false
+    anonymousRead: false
+    quota:
+      size: 1Gi
+      enforce: true

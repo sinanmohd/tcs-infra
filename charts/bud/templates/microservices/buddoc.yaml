@@ -1,0 +1,93 @@
+{{- if (default .Values.microservices.buddoc.enabled false) }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-buddoc
+  annotations:
+    {{- range $key, $value := .Values.deploymentAnnotations }}
+    {{ $key }}: {{ $value | quote }}
+    {{- end }}
+spec:
+  {{- if not (and .Values.microservices.buddoc.autoscaling .Values.microservices.buddoc.autoscaling.enabled) }}
+  replicas: 1
+  {{- end }}
+  selector:
+    matchLabels:
+      app: {{ .Release.Name }}-buddoc
+  template:
+    metadata:
+      labels:
+        app: {{ .Release.Name }}-buddoc
+      annotations:
+        dapr.io/enabled: "true"
+        dapr.io/app-id: {{ .Values.microservices.buddoc.daprid }}
+        dapr.io/app-port: "9081"
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- $nodeSelector := include "bud.nodeSelector" (dict "service" .Values.microservices.buddoc "global" .Values.global "context" $) }}
+      {{- if $nodeSelector }}
+      nodeSelector:
+        {{- $nodeSelector | nindent 8 }}
+      {{- end }}
+      {{- $affinity := include "bud.affinity" (dict "service" .Values.microservices.buddoc "global" .Values.global "context" $) }}
+      {{- if $affinity }}
+      affinity:
+        {{- $affinity | nindent 8 }}
+      {{- end }}
+      containers:
+      - name: {{ .Release.Name }}-buddoc
+        image: {{ .Values.microservices.buddoc.image }}
+        imagePullPolicy: {{ .Values.imagePullPolicy }}
+        command: ["sh", "-c", "alembic upgrade head && uvicorn buddoc.main:app --host 0.0.0.0 --port 9081"]
+        ports:
+        - containerPort: 9081
+        env:
+          - name: PSQL_HOST
+            value: {{ $.Values.externalServices.postgresql.host | quote }}
+          - name: PSQL_PORT
+            value: {{ $.Values.externalServices.postgresql.port | quote }}
+          - name: PSQL_USER
+            value: {{ $.Values.externalServices.postgresql.databases.buddoc.username | quote }}
+          - name: PSQL_PASSWORD
+            value: {{ $.Values.externalServices.postgresql.databases.buddoc.password | quote }}
+          - name: PSQL_DB_NAME
+            value: {{ $.Values.externalServices.postgresql.databases.buddoc.name | quote }}
+        {{ $root := . }}
+        {{- range $key, $value := .Values.microservices.buddoc.env }}
+          - name: {{ $key }}
+            value: {{ tpl $value $root | quote }}
+        {{- end }}
+        envFrom:
+          - configMapRef:
+              name: {{ .Release.Name}}-bud-global
+        {{- with .Values.microservices.buddoc.resources }}
+        resources:
+          {{- toYaml . | nindent 10 }}
+        {{- end }}
+        {{- include "bud.healthProbes" (dict "port" 9081 "probes" .Values.microservices.buddoc.probes) | nindent 8 }}
+        volumeMounts:
+        - name: temp-uploads
+          mountPath: /tmp/buddoc_uploads
+      volumes:
+      - name: temp-uploads
+        emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Release.Name }}-buddoc
+spec:
+  ports:
+  - port: 9081
+    targetPort: 9081
+  selector:
+    app: {{ .Release.Name }}-buddoc
+  type: ClusterIP
+{{- if and .Values.microservices.buddoc.autoscaling .Values.microservices.buddoc.autoscaling.enabled }}
+---
+{{- include "bud.hpa" (dict "serviceName" "buddoc" "Values" .Values "Release" .Release) }}
+{{- end }}
+{{ end }}

@@ -1,0 +1,30 @@
+ingress:
+  https: true
+  host: auth.bud.cislabs.net
+
+realms:
+  keycloak-bud-keycloak-realm:
+    clients:
+      budadmin-web:
+        attributes:
+          post.logout.redirect.uris: https://admin.bud.cislabs.net
+        redirectUris:
+          - https://app.bud.cislabs.net/auth/redirect/callback
+      budcustomer-web:
+        attributes:
+          post.logout.redirect.uris: https://admin.bud.cislabs.net##https://customer.bud.cislabs.net##https://playground.bud.cislabs.net
+        redirectUris:
+          - https://app.bud.cislabs.net/auth/redirect/callback
+          # Customer-app root: allow-lists KEYCLOAK_CUSTOMER_ACTION_REDIRECT_URI so a CLIENT
+          # user's invite/reset "set password" flow can redirect into the customer portal.
+          - https://customer.bud.cislabs.net/*
+      budplayground-web:
+        attributes:
+          post.logout.redirect.uris: https://playground.bud.cislabs.net
+        redirectUris:
+          - https://app.bud.cislabs.net/auth/redirect/callback
+      mcp-gateway:
+        attributes:
+          post.logout.redirect.uris: https://admin.bud.cislabs.net##https://customer.bud.cislabs.net##https://playground.bud.cislabs.net
+        redirectUris:
+          - https://app.bud.cislabs.net/auth/redirect/callback

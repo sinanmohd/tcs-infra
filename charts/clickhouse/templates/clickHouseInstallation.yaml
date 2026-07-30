@@ -1,0 +1,116 @@
+{{ $installName := "clickhouse" }}
+{{ $clusterName := "cluster" }}
+apiVersion: clickhouse.altinity.com/v1
+kind: ClickHouseInstallation
+metadata:
+  name: {{ $installName | quote }}
+spec:
+  configuration:
+    files:
+      system_logs_ttl.xml: |
+        <clickhouse>
+          <processors_profile_log>
+            <ttl>event_date + INTERVAL 3 DAY DELETE</ttl>
+          </processors_profile_log>
+          <query_log>
+            <engine>Engine = MergeTree PARTITION BY event_date ORDER BY event_time TTL event_date + interval 3 day</engine>
+          </query_log>
+          <trace_log>
+            <engine>Engine = MergeTree PARTITION BY event_date ORDER BY event_time TTL event_date + interval 3 day</engine>
+          </trace_log>
+          <part_log>
+            <engine>Engine = MergeTree PARTITION BY event_date ORDER BY event_time TTL event_date + interval 3 day</engine>
+          </part_log>
+          <aggregated_zookeeper_log>
+            <ttl>event_date + INTERVAL 3 DAY</ttl>
+          </aggregated_zookeeper_log>
+          <metric_log>
+            <ttl>event_date + INTERVAL 3 DAY</ttl>
+          </metric_log>
+          <asynchronous_metric_log>
+            <ttl>event_date + INTERVAL 3 DAY</ttl>
+          </asynchronous_metric_log>
+          <background_schedule_pool_log>
+            <ttl>event_date + INTERVAL 3 DAY</ttl>
+          </background_schedule_pool_log>
+          <query_views_log>
+            <ttl>event_date + INTERVAL 3 DAY</ttl>
+          </query_views_log>
+          <query_metric_log>
+            <ttl>event_date + INTERVAL 3 DAY</ttl>
+          </query_metric_log>
+          <text_log>
+            <ttl>event_date + INTERVAL 3 DAY</ttl>
+          </text_log>
+          <error_log>
+            <ttl>event_date + INTERVAL 3 DAY</ttl>
+          </error_log>
+          <asynchronous_insert_log>
+            <ttl>event_date + INTERVAL 3 DAY</ttl>
+          </asynchronous_insert_log>
+          <zookeeper_connection_log>
+            <ttl>event_date + INTERVAL 3 DAY</ttl>
+          </zookeeper_connection_log>
+        </clickhouse>
+    settings:
+      {{- with $.Values.configuration.settings }}
+      {{- . | toYaml | nindent 6 }}
+      {{- end }}
+      logger/level: "warning"
+
+    {{- with $.Values.configuration.profiles }}
+    profiles:
+      {{- . | toYaml | nindent 8 }}
+    {{- end }}
+    users:
+      default/networks/ip:
+        - "::/0"
+    {{- if $.Values.keeper.enabled }}
+    zookeeper:
+      nodes:
+        - host: "keeper-clickhouse-keeper"
+          port: 2181
+    {{- end }}
+    clusters:
+      - name: {{ $clusterName | quote }}
+        layout:
+          shardsCount: 1
+          replicasCount: {{ .Values.replicaCount }}
+        templates:
+          podTemplate: clickhouse-pod
+          volumeClaimTemplate: clickhouse-storage
+
+  templates:
+    podTemplates:
+      - name: clickhouse-pod
+        spec:
+          containers:
+            - name: clickhouse
+              image: {{ .Values.image | quote }}
+              {{- with $.Values.resources }}
+              resources:
+                {{- . | toYaml | nindent 16 }}
+              {{- end }}
+          affinity:
+            podAntiAffinity:
+              preferredDuringSchedulingIgnoredDuringExecution:
+              - podAffinityTerm:
+                  labelSelector:
+                    matchLabels:
+                      clickhouse.altinity.com/chi: {{ $installName | quote }}
+                      clickhouse.altinity.com/cluster: {{ $clusterName | quote }}
+                  topologyKey: kubernetes.io/hostname
+                weight: 100
+
+    volumeClaimTemplates:
+      - name: clickhouse-storage
+        reclaimPolicy: {{ .Values.reclaimPolicy | required "A valid reclaimPolicy is required" | quote }}
+        spec:
+          accessModes:
+            - ReadWriteOnce
+          resources:
+            requests:
+              storage: {{ .Values.size | required "A valid size is required" | quote }}
+          {{- with $.Values.storageClass }}
+          storageClassName: {{ . | quote }}
+          {{- end }}

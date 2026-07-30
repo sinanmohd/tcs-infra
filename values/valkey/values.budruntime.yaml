@@ -1,0 +1,6 @@
+config:
+  extraConfig:
+    - "notify-keyspace-events KEA"
+resources:
+  limits:
+    memory: 1Gi

@@ -1,0 +1,51 @@
+ingress:
+  enabled: false
+  host: localhost
+
+harbor:
+  enabled: true
+  harborAdminPassword: changeme
+  externalURL: http://127.0.0.1:8080
+  persistence:
+    imageChartStorage:
+      type: s3
+      s3:
+        bucket: harbor
+        regionendpoint: http://seaweed-s3.seaweedfs:8333
+        encrypt: false
+        secure: false
+  portal:
+    replicas: 2
+  core:
+    replicas: 2
+  jobservice:
+    replicas: 2
+    jobLoggers: ["stdout"]
+  registry:
+    replicas: 2
+  expose:
+    type: clusterIP
+    tls:
+      enabled: false
+  database:
+    type: external
+    external:
+      host: "pooler-rw.postgres"
+      port: 5432
+      username: "harbor"
+      password: "harbor"
+      coreDatabase: "harbor"
+  trivy:
+    enabled: false
+  # redis:
+  #   type: external
+  #   external:
+  #     coreDatabaseIndex: "0"
+  #     harborDatabaseIndex: "0"
+  #     cacheLayerDatabaseIndex: "0"
+  #     jobserviceDatabaseIndex: "1"
+  #     registryDatabaseIndex: "2"
+  #     trivyAdapterIndex: "5"
+  #     addr: "harbor.valkey:6379"
+  #     username: "harbor"
+  #     password: "valkey"

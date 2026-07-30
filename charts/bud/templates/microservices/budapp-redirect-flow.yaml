@@ -1,0 +1,70 @@
+{{- /*
+BFF redirect-flow secret (defaultClientSecret + sessionSecret +
+OIDC_CLIENTS_BY_HOST JSON). Two value schemas; both produce the same JSON:
+
+  Host-keyed (legacy):  clientsByHost.<host>.{clientId, clientSecret, ...}
+  App-keyed (preferred): clientsByHost.<app>.{clientId, hosts: [...], ...}
+
+Runtime semantics: see ClientConfig + RedirectFlowConfig in
+budapp/auth/redirect_flow.py. The KEYCLOAK_CLIENTS_BY_HOST env name from
+earlier releases still resolves via AliasChoices.
+*/}}
+{{- if (default .Values.microservices.budapp.enabled false) }}
+{{- $rf := .Values.microservices.budapp.redirectFlow | default dict }}
+{{- $defaultRedirect := printf "%s/auth/redirect/callback" (include "bud.ingress.url.budapp" $) }}
+{{- $clientsByHost := dict }}
+{{- range $appOrHost, $cfg := ($rf.clientsByHost | default dict) }}
+  {{- $resolvedKey := tpl $appOrHost $ }}
+  {{- /* Empty hosts → legacy schema, dict key is the host. */ -}}
+  {{- $hosts := list }}
+  {{- range (default (list) $cfg.hosts) }}
+    {{- $hosts = append $hosts (tpl . $) }}
+  {{- end }}
+  {{- $effectiveHosts := default (list $resolvedKey) $hosts }}
+  {{- /* Default origins = https://<each-host>; override for non-HTTPS hosts
+         (e.g. localhost:3000) via allowedReturnUrlOrigins. */ -}}
+  {{- $defaultOrigins := list }}
+  {{- range $effectiveHosts }}
+    {{- $defaultOrigins = append $defaultOrigins (printf "https://%s" .) }}
+  {{- end }}
+  {{- $origins := list }}
+  {{- if $cfg.allowedReturnUrlOrigins }}
+    {{- range $cfg.allowedReturnUrlOrigins }}
+      {{- $origins = append $origins (tpl . $) }}
+    {{- end }}
+  {{- else }}
+    {{- $origins = $defaultOrigins }}
+  {{- end }}
+  {{- /* Portal access gate: user_type values allowed to log in via this client.
+         Empty/unset → budapp applies its built-in default (admin console=admin-only,
+         customer portal=client+admin); other clients stay unrestricted. */ -}}
+  {{- $allowedUserTypes := list }}
+  {{- range (default (list) $cfg.allowedUserTypes) }}
+    {{- $allowedUserTypes = append $allowedUserTypes . }}
+  {{- end }}
+  {{- $entry := dict
+        "client_id" ($cfg.clientId | default "")
+        "client_secret" ($cfg.clientSecret | default "")
+        "redirect_uri" (default $defaultRedirect $cfg.redirectUri)
+        "allowed_return_url_origins" $origins
+        "hosts" $effectiveHosts
+        "allowed_user_types" $allowedUserTypes
+  }}
+  {{- $_ := set $clientsByHost $resolvedKey $entry }}
+{{- end }}
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ .Release.Name }}-budapp-redirect-flow
+  labels:
+    app: {{ .Release.Name }}-budapp
+    bud.studio/component: redirect-flow
+type: Opaque
+stringData:
+  defaultClientSecret: {{ $rf.defaultClientSecret | default "" | quote }}
+  # budapp-admin client secret; must match the keycloak chart's budapp-admin client.
+  adminClientSecret: {{ $rf.adminClientSecret | default "" | quote }}
+  sessionSecret: {{ $rf.sessionSecret | default "" | quote }}
+  clientsByHost: |-
+    {{- $clientsByHost | toJson | nindent 4 }}
+{{- end }}

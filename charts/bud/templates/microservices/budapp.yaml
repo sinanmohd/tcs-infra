@@ -1,0 +1,281 @@
+{{- if (default .Values.microservices.budapp.enabled false) }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name}}-budapp
+  annotations:
+    {{- range $key, $value := .Values.deploymentAnnotations }}
+    {{ $key }}: {{ $value | quote }}
+    {{- end }}
+spec:
+  {{- if not (and .Values.microservices.budapp.autoscaling .Values.microservices.budapp.autoscaling.enabled) }}
+  replicas: 1
+  {{- end }}
+  selector:
+    matchLabels:
+      app: {{ .Release.Name}}-budapp
+  template:
+    metadata:
+      labels:
+        app: {{ .Release.Name}}-budapp
+      annotations:
+        dapr.io/enabled: "true"
+        dapr.io/app-id: {{ .Values.microservices.budapp.daprid }}
+        dapr.io/app-port: "9082"
+        dapr.io/app-token-secret: "{{ .Release.Name }}-app-api-token"
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- $nodeSelector := include "bud.nodeSelector" (dict "service" .Values.microservices.budapp "global" .Values.global "context" $) }}
+      {{- if $nodeSelector }}
+      nodeSelector:
+        {{- $nodeSelector | nindent 8 }}
+      {{- end }}
+      {{- $affinity := include "bud.affinity" (dict "service" .Values.microservices.budapp "global" .Values.global "context" $) }}
+      {{- if $affinity }}
+      affinity:
+        {{- $affinity | nindent 8 }}
+      {{- end }}
+      containers:
+      - name: {{ .Release.Name}}-budapp
+        image: {{ .Values.microservices.budapp.image }}
+        imagePullPolicy: {{ .Values.imagePullPolicy }}
+        ports:
+        - containerPort: 9082
+        env:
+          - name: APP_API_TOKEN
+            valueFrom:
+              secretKeyRef:
+                name: {{ .Release.Name }}-app-api-token
+                key: token
+          - name: BUD_INTERNAL_TOKEN
+            valueFrom:
+              secretKeyRef:
+                name: {{ .Release.Name }}-bud-internal-token
+                key: token
+                optional: true
+          - name: PRIVATE_KEY_PATH
+            value: "/app/keys/rsa-private-key.pem"
+          - name: PRIVATE_KEY_PASSWORD
+            valueFrom:
+              secretKeyRef:
+                name: {{ .Release.Name }}-rsa-keys
+                key: private-key-password
+          - name: PUBLIC_KEY_PATH
+            value: "/app/keys/rsa-public-key.pem"
+          - name: BUD_CLUSTER_APP_ID
+            value: {{ .Values.microservices.budcluster.daprid }}
+          - name: BUD_MODEL_APP_ID
+            value: {{ .Values.microservices.budmodel.daprid }}
+          - name: BUD_METRICS_APP_ID
+            value: {{ .Values.microservices.budmetrics.daprid }}
+          - name: BUD_NOTIFY_APP_ID
+            value: {{ .Values.microservices.budnotify.daprid }}
+          - name: BUD_SIMULATOR_APP_ID
+            value: {{ .Values.microservices.budsim.daprid }}
+          - name: BUD_EVAL_APP_ID
+            value: {{ .Values.microservices.budeval.daprid }}
+          - name: BUD_PROMPT_APP_ID
+            value: {{ .Values.microservices.budprompt.daprid }}
+          - name: BUD_PIPELINE_APP_ID
+            value: {{ .Values.microservices.budpipeline.daprid }}
+          - name: BUD_EVENT_APP_ID
+            value: {{ .Values.microservices.budevent.daprid }}
+          # budevent's /internal/* accepts the shared app-api-token (or dapr-api-token).
+          - name: BUDEVENT_APP_API_TOKEN
+            valueFrom:
+              secretKeyRef:
+                name: {{ .Release.Name }}-app-api-token
+                key: token
+          - name: BUD_APP_EXTERNAL_URL
+            value: {{ include "bud.ingress.url.budapp" $ }}
+          - name: FRONTEND_URL
+            value: {{ include "bud.ingress.url.budcustomer" . }}
+          - name: ADMIN_FRONTEND_URL
+            value: {{ include "bud.ingress.url.budadmin" . }}
+          - name: CORS_ORIGINS
+            value: "{{ join "," .Values.microservices.budapp.corsOrigins }},{{ include "bud.ingress.url.budadmin" $ }},{{ include "bud.ingress.url.budplayground" $ }},{{ include "bud.ingress.url.budcustomer" $ }}"
+          - name: STATIC_DIR
+            value: "/data/static-dir"
+          # postgresql
+          - name: PSQL_HOST
+            value: {{ default $.Values.externalServices.postgresql.host $.Values.microservices.budapp.psqlHost | quote }}
+          - name: PSQL_PORT
+            value: {{ $.Values.externalServices.postgresql.port | quote }}
+          - name: PSQL_USER
+            value: {{ $.Values.externalServices.postgresql.databases.budapp.username | quote }}
+          - name: PSQL_PASSWORD
+            value: {{ $.Values.externalServices.postgresql.databases.budapp.password | quote }}
+          - name: PSQL_DB_NAME
+            value: {{ $.Values.externalServices.postgresql.databases.budapp.name | quote }}
+          # s3
+          - name: MINIO_ENDPOINT
+            value: {{ $.Values.externalServices.s3.endpoint | quote }}
+          - name: MINIO_ACCESS_KEY
+            value: {{ $.Values.externalServices.s3.auth.accessKey | quote }}
+          - name: MINIO_SECRET_KEY
+            value: {{ $.Values.externalServices.s3.auth.secretKey | quote }}
+          - name: MINIO_BUCKET
+            value: {{ $.Values.externalServices.s3.buckets.modelRegistry | quote }}
+          - name: MINIO_MODEL_BUCKET
+            value: {{ $.Values.externalServices.s3.buckets.modelInfo | quote }}
+          - name: MINIO_SECURE
+            value: {{ $.Values.externalServices.s3.secure | default false | quote }}
+          - name: MCP_FOUNDRY_BASE_URL
+            value: http://{{ .Release.Name }}-mcpgateway:4444
+          - name: OAUTH_RETURN_URL_ALLOWED_DOMAINS
+            value: "{{ include "bud.ingress.hosts.budadmin" . }},{{ include "bud.ingress.hosts.budcustomer" . }},{{ include "bud.ingress.hosts.budplayground" . }},{{ include "bud.ingress.hosts.onyx" . }},localhost,127.0.0.1"
+          # BFF redirect-flow envs (FRD-003).
+          {{- $rf := .Values.microservices.budapp.redirectFlow | default dict }}
+          - name: AUTH_REDIRECT_FLOW_ENABLED
+            value: {{ $rf.enabled | default false | quote }}
+          # AUTH_LEGACY_PASSWORD_ENABLED env intentionally not rendered —
+          # the ROPC /auth/login path is HTTP 410-Gone unconditionally
+          # after OIDC-portability; the toggle has no effect.
+          # Per-frontend OAuth client config. Renamed from KEYCLOAK_* to
+          # OIDC_* in the FRD-oidc-portability PR; the old env names still
+          # resolve via Pydantic AliasChoices so this rename is non-breaking.
+          - name: OIDC_CLIENT_ID
+            value: {{ $rf.defaultClientId | default "budadmin-web" | quote }}
+          - name: OIDC_CLIENT_SECRET
+            valueFrom:
+              secretKeyRef:
+                name: {{ .Release.Name }}-budapp-redirect-flow
+                key: defaultClientSecret
+          - name: OIDC_REDIRECT_URI
+            value: "{{ include "bud.ingress.url.budapp" $ }}/auth/redirect/callback"
+          - name: OIDC_CLIENTS_BY_HOST
+            valueFrom:
+              secretKeyRef:
+                name: {{ .Release.Name }}-budapp-redirect-flow
+                key: clientsByHost
+          {{- if $rf.clientsByHostDefault }}
+          - name: OIDC_CLIENTS_BY_HOST_DEFAULT
+            # ``tpl`` so overlays can use ``{{ include "bud.ingress.hosts.budadmin" . }}``,
+            # matching how ``clientsByHost`` keys above are templated.
+            value: {{ tpl ($rf.clientsByHostDefault | toString) $ | quote }}
+          {{- end }}
+          # budapp-admin provisioning. The id defaults to budapp-admin, but the feature only
+          # activates when KEYCLOAK_ADMIN_CLIENT_SECRET (redirectFlow.adminClientSecret, per-env
+          # encrypted) is also set — empty secret -> NullProvisioner (off). On an already-imported
+          # realm, ensure the budapp-admin client exists before setting the secret, or it 401s.
+          - name: KEYCLOAK_ADMIN_CLIENT_ID
+            value: {{ $rf.adminClientId | default "" | quote }}
+          - name: KEYCLOAK_ADMIN_CLIENT_SECRET
+            valueFrom:
+              secretKeyRef:
+                name: {{ .Release.Name }}-budapp-redirect-flow
+                key: adminClientSecret
+          # Post-action redirect after the hosted UPDATE_PASSWORD flow; must be allow-listed on OIDC_CLIENT_ID.
+          - name: KEYCLOAK_ACTION_REDIRECT_URI
+            value: {{ $rf.actionRedirectUri | default (printf "%s/" (include "bud.ingress.url.budadmin" $)) | quote }}
+          # CLIENT-user (customer portal) action-email pair. When set, a CLIENT's invite/reset
+          # email redirects back into the customer app instead of the admin console. The customer
+          # redirect MUST be allow-listed on OIDC_CUSTOMER_CLIENT_ID (budcustomer-web).
+          - name: OIDC_CUSTOMER_CLIENT_ID
+            value: {{ $rf.customerClientId | default "budcustomer-web" | quote }}
+          - name: KEYCLOAK_CUSTOMER_ACTION_REDIRECT_URI
+            value: {{ $rf.customerActionRedirectUri | default (printf "%s/" (include "bud.ingress.url.budcustomer" $)) | quote }}
+          - name: SESSION_SECRET
+            valueFrom:
+              secretKeyRef:
+                name: {{ .Release.Name }}-budapp-redirect-flow
+                key: sessionSecret
+          - name: SESSION_TTL_SECONDS
+            value: {{ $rf.sessionTtlSeconds | default 43200 | quote }}
+          - name: SESSION_COOKIE_NAME
+            value: {{ $rf.sessionCookieName | default "__Host-bud_session" | quote }}
+          - name: CSRF_COOKIE_NAME
+            value: {{ $rf.csrfCookieName | default "__Host-bud_csrf" | quote }}
+          - name: PKCE_COOKIE_NAME
+            value: {{ $rf.pkceCookieName | default "__Host-budauth_pkce" | quote }}
+          # KEYCLOAK_REALM_*_THEME env vars removed — budapp no longer pushes
+          # theme settings via admin API after FRD-oidc-portability. Themes
+          # are now owned declaratively by infra/helm/keycloak/'s
+          # ``KeycloakRealmImport`` CR. The ``microservices.budapp.realmTheme``
+          # values block is no-op and can be removed from overlays.
+{{- if (default .Values.microservices.budsentinel.enabled false) }}
+          - name: BUD_SENTINEL_BASE_URL
+            value: http://{{ .Release.Name }}-budsentinel:50051
+{{ end }}
+        {{- $root := . }}
+        {{- range $key, $value := .Values.microservices.budapp.env }}
+          - name: {{ $key }}
+            value: {{ tpl $value $root | quote }}
+        {{- end }}
+        envFrom:
+          - configMapRef:
+              name: {{ .Release.Name}}-bud-global
+        {{- with .Values.microservices.budapp.resources }}
+        resources:
+          {{- toYaml . | nindent 10 }}
+        {{- end }}
+        {{- include "bud.healthProbes" (dict "port" 9082 "probes" .Values.microservices.budapp.probes) | nindent 8 }}
+        volumeMounts:
+        - name: add-dir-budmo
+          mountPath: /datadisk/add_model_dir
+        - name: static-dir
+          mountPath: /data/static-dir
+        - name: rsa-keys
+          mountPath: /app/keys
+          readOnly: true
+      volumes:
+      - name: add-dir-budmo
+        persistentVolumeClaim:
+          claimName: {{ .Release.Name }}-bud-add-dir-budmo
+      - name: static-dir
+        persistentVolumeClaim:
+          claimName: {{ .Release.Name }}-bud-static-dir
+      - name: rsa-keys
+        secret:
+          secretName: {{ .Release.Name }}-rsa-keys
+          defaultMode: 0444
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Release.Name }}-budapp
+spec:
+  ports:
+  - port: 9082
+    targetPort: 9082
+  selector:
+    app: {{ .Release.Name }}-budapp
+  type: ClusterIP
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ .Release.Name }}-bud-static-dir
+spec:
+{{ if .Values.storage.budappStaticDir.className }}
+  storageClassName: {{ .Values.storage.budappStaticDir.className }}
+{{ end }}
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: {{ .Values.storage.budappStaticDir.size }}
+---
+apiVersion: dapr.io/v2alpha1
+kind: Subscription
+metadata:
+  name: {{ .Release.Name }}-budapp-pubsub-subscription
+spec:
+  topic: budAppMessages
+  routes:
+    rules:
+      - match: event.type == "credential_update"
+        path: /credentials/update
+    default: /notifications
+  pubsubname: {{ .Release.Name }}-pubsub
+  deadLetterTopic: poisonMessages
+scopes:
+  - budapp
+{{- if and .Values.microservices.budapp.autoscaling .Values.microservices.budapp.autoscaling.enabled }}
+---
+{{- include "bud.hpa" (dict "serviceName" "budapp" "Values" .Values "Release" .Release) }}
+{{- end }}
+{{ end }}

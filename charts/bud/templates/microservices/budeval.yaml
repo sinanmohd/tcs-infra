@@ -1,0 +1,209 @@
+{{- if (default .Values.microservices.budeval.enabled false) }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ .Release.Name }}-budeval-dataset
+spec:
+{{ if .Values.storage.budevalDataset.className }}
+  storageClassName: {{ .Values.storage.budevalDataset.className }}
+{{ end }}
+  accessModes:
+    - {{ $.Values.storage.budevalDataset.accessMode | quote }}
+  resources:
+    requests:
+      storage: {{ .Values.storage.budevalDataset.size }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ .Release.Name }}-budeval
+rules:
+  - apiGroups: [""]
+    resources: ["persistentvolumeclaims"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["batch"]
+    resources: ["jobs"]
+    verbs: ["create", "get", "delete"]
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["create", "get", "delete"]
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "watch", "create", "delete"]
+  - apiGroups: [""]
+    resources: ["pods/exec"]
+    verbs: ["create", "get"]
+  - apiGroups: [""]
+    resources: ["pods/log"]
+    verbs: ["get"]
+  - apiGroups: [""]
+    resources: ["pods/status"]
+    verbs: ["get", "patch", "update"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ .Release.Name }}-budeval
+subjects:
+  - kind: ServiceAccount
+    name: default
+roleRef:
+  kind: Role
+  name: {{ .Release.Name }}-budeval
+  apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-budeval
+  annotations:
+    {{- range $key, $value := .Values.deploymentAnnotations }}
+    {{ $key }}: {{ $value | quote }}
+    {{- end }}
+spec:
+  {{- if not (and .Values.microservices.budeval.autoscaling .Values.microservices.budeval.autoscaling.enabled) }}
+  replicas: 1
+  {{- end }}
+  # The eval-datasets PVC is ReadWriteOnce. Terminate the old pod before creating
+  # the new one (maxSurge: 0) so the volume is released first and the rollout
+  # cannot multi-attach-deadlock. Keeping type RollingUpdate (not Recreate) avoids
+  # the server-side-apply error when an existing Deployment already has the
+  # rollingUpdate field set.
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 0
+      maxUnavailable: 1
+  selector:
+    matchLabels:
+      app: {{ .Release.Name }}-budeval
+  template:
+    metadata:
+      labels:
+        app: {{ .Release.Name }}-budeval
+      annotations:
+        dapr.io/enabled: "true"
+        dapr.io/app-id: {{ .Values.microservices.budeval.daprid }}
+        dapr.io/app-port: "3003"
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- $nodeSelector := include "bud.nodeSelector" (dict "service" .Values.microservices.budeval "global" .Values.global "context" $) }}
+      {{- if $nodeSelector }}
+      nodeSelector:
+        {{- $nodeSelector | nindent 8 }}
+      {{- end }}
+      {{- $affinity := include "bud.affinity" (dict "service" .Values.microservices.budeval "global" .Values.global "context" $) }}
+      {{- if $affinity }}
+      affinity:
+        {{- $affinity | nindent 8 }}
+      {{- end }}
+      containers:
+      - name: {{ .Release.Name }}-budeval
+        image: {{ .Values.microservices.budeval.image }}
+        imagePullPolicy: {{ .Values.imagePullPolicy }}
+        command: ["sh", "-c", "alembic -c ./alembic.ini upgrade head && uvicorn budeval.main:app --host 0.0.0.0 --port 3003"]
+        ports:
+        - containerPort: 3003
+        env:
+          - name: EVAL_MANIFEST_URL
+            value: "place_holder"
+          - name: EVAL_SYNC_ENABLED
+            value: "true"
+          - name: EVAL_SYNC_USE_BUNDLES
+            value: "false"
+          - name: EVAL_SYNC_LOCAL_MODE
+            value: "false"
+          - name: STORAGE_BACKEND
+            value: "clickhouse"
+          - name: CLICKHOUSE_HOST
+            value: {{ $.Values.externalServices.clickhouse.host | quote }}
+          - name: CLICKHOUSE_PORT
+            value: {{ $.Values.externalServices.clickhouse.port | quote }}
+          - name: CLICKHOUSE_DATABASE
+            value: {{ $.Values.externalServices.clickhouse.databases.budeval | quote }}
+          - name: CLICKHOUSE_USER
+            value: {{ $.Values.externalServices.clickhouse.auth.username | quote }}
+          - name: CLICKHOUSE_PASSWORD
+            value: {{ $.Values.externalServices.clickhouse.auth.password | quote }}
+          - name: CLICKHOUSE_BATCH_SIZE
+            value: "1000"
+          - name: CLICKHOUSE_POOL_MIN_SIZE
+            value: "1"
+          - name: CLICKHOUSE_POOL_MAX_SIZE
+            value: "10"
+          - name: CLICKHOUSE_ASYNC_INSERT
+            value: "true"
+          - name: CLICKHOUSE_COMPRESSION
+            value: "zstd"
+          - name: CLICKHOUSE_SECURE
+            value: "false"
+          - name: EVAL_DATASETS_PATH
+            value: {{ .Release.Name }}-budeval-dataset
+          - name: NOTIFY_SERVICE_NAME
+            value: {{ .Values.microservices.budnotify.daprid }}
+          - name: NOTIFY_SERVICE_TOPIC
+            value: "{{ $.Release.Namespace }}-{{ $.Release.Name }}-{{ .Values.microservices.budnotify.pubsubTopic }}"
+          - name: PSQL_HOST
+            value: {{ $.Values.externalServices.postgresql.host | quote }}
+          - name: PSQL_PORT
+            value: {{ $.Values.externalServices.postgresql.port | quote }}
+          - name: PSQL_USER
+            value: {{ $.Values.externalServices.postgresql.databases.budeval.username | quote }}
+          - name: PSQL_PASSWORD
+            value: {{ $.Values.externalServices.postgresql.databases.budeval.password | quote }}
+          - name: PSQL_DB_NAME
+            value: {{ $.Values.externalServices.postgresql.databases.budeval.name | quote }}
+        {{ $root := . }}
+        {{- range $key, $value := .Values.microservices.budeval.env }}
+          - name: {{ $key }}
+            value: {{ tpl $value $root | quote }}
+        {{- end }}
+        {{- with .Values.microservices.budeval.resources }}
+        resources:
+          {{- toYaml . | nindent 10 }}
+        {{- end }}
+        {{- include "bud.healthProbes" (dict "port" 3003 "probes" .Values.microservices.budeval.probes) | nindent 8 }}
+        # Mount the shared eval-datasets PVC so the long-running service is its
+        # first consumer: this binds the WaitForFirstConsumer volume at install
+        # time (otherwise it stays Pending until an eval runs, which blocks
+        # ArgoCD sync) and is where dataset seeding will write.
+        volumeMounts:
+        - name: eval-datasets
+          mountPath: /datasets
+      volumes:
+      - name: eval-datasets
+        persistentVolumeClaim:
+          claimName: {{ .Release.Name }}-budeval-dataset
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Release.Name }}-budeval
+spec:
+  ports:
+  - port: 3003
+    targetPort: 3003
+  selector:
+    app: {{ .Release.Name }}-budeval
+  type: ClusterIP
+---
+apiVersion: dapr.io/v2alpha1
+kind: Subscription
+metadata:
+  name: {{ .Release.Name }}-budeval-pubsub-subscription
+spec:
+  topic: budEvalMessages
+  routes:
+    default: /notifications
+  pubsubname: {{ .Release.Name }}-pubsub
+  deadLetterTopic: poisonMessages
+scopes:
+  - budeval
+{{- if and .Values.microservices.budeval.autoscaling .Values.microservices.budeval.autoscaling.enabled }}
+---
+{{- include "bud.hpa" (dict "serviceName" "budeval" "Values" .Values "Release" .Release) }}
+{{- end }}
+{{ end }}

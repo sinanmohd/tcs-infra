@@ -1,0 +1,109 @@
+{{- if (default .Values.microservices.budcustomer.enabled false) }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-budcustomer
+  annotations:
+    {{- range $key, $value := .Values.deploymentAnnotations }}
+    {{ $key }}: {{ $value | quote }}
+    {{- end }}
+spec:
+  {{- if not (and .Values.microservices.budcustomer.autoscaling .Values.microservices.budcustomer.autoscaling.enabled) }}
+  replicas: 1
+  {{- end }}
+  selector:
+    matchLabels:
+      app: {{ .Release.Name }}-budcustomer
+  template:
+    metadata:
+      labels:
+        app: {{ .Release.Name }}-budcustomer
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- $nodeSelector := include "bud.nodeSelector" (dict "service" .Values.microservices.budcustomer "global" .Values.global "context" $) }}
+      {{- if $nodeSelector }}
+      nodeSelector:
+        {{- $nodeSelector | nindent 8 }}
+      {{- end }}
+      {{- $affinity := include "bud.affinity" (dict "service" .Values.microservices.budcustomer "global" .Values.global "context" $) }}
+      {{- if $affinity }}
+      affinity:
+        {{- $affinity | nindent 8 }}
+      {{- end }}
+      containers:
+      - name: {{ .Release.Name }}-budcustomer
+        image: {{ .Values.microservices.budcustomer.image }}
+        imagePullPolicy: {{ .Values.imagePullPolicy }}
+        ports:
+        - containerPort: 3000
+
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: 3000
+          initialDelaySeconds: 16
+          periodSeconds: 8
+        readinessProbe:
+          httpGet:
+            path: /healthz
+            port: 3000
+          initialDelaySeconds: 8
+          periodSeconds: 4
+        env:
+          - name: ENTRYPOINT_BUDNOTIFY_SERVICE
+            value: "{{ .Release.Name }}-budnotify:3000"
+          - name: DECRYPT_PASSWORD
+            value: {{ .Values.microservices.rsaKeys.privateKeyPassword }}
+          - name: DECRYPT_PRIVATE_KEY
+            value: {{ .Values.microservices.rsaKeys.privateKey | b64enc }}
+          - name: NEXT_PUBLIC_NOVU_SOCKET_URL
+            value: {{ include "bud.ingress.url.novuws" $ }}
+          - name: NEXT_PUBLIC_NOVU_BASE_URL
+            value: {{ include "bud.ingress.url.novuapi" $ }}
+          - name: NEXT_PUBLIC_BASE_URL
+            value: {{ include "bud.ingress.url.budapp" $ }}
+          - name: NEXT_PUBLIC_TEMP_API_BASE_URL
+            value: {{ include "bud.ingress.url.budapp" $ }}
+          - name: NEXT_PUBLIC_COPY_CODE_API_BASE_URL
+            value: {{ include "bud.ingress.url.budgateway" $ }}
+          - name: NEXT_PUBLIC_PLAYGROUND_URL
+            value: {{ include "bud.ingress.url.budplayground" $ }}
+          - name: NEXT_PUBLIC_ASK_BUD_URL
+            value: {{ include "bud.ingress.url.budask" $ }}
+          - name: ESLINT_NO_DEV_WARNINGS
+            value: 'true'
+          - name: NEXT_HIDE_ERROR_OVERLAY
+            value: 'true'
+          - name: NEXT_PUBLIC_ANTD_HASH_SEED
+            value: 'budcustomer'
+          - name: NEXT_PUBLIC_ASK_BUD_MODEL
+            value: 'bud-gpt-oss-20b-ada28b58'
+        {{ $root := . }}
+        {{- range $key, $value := .Values.microservices.budcustomer.env }}
+          - name: {{ $key }}
+            value: {{ tpl $value $root | quote }}
+        {{- end }}
+        {{- with .Values.microservices.budcustomer.resources }}
+        resources:
+          {{- toYaml . | nindent 10 }}
+        {{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Release.Name }}-budcustomer
+spec:
+  ports:
+  - port: 3000
+    targetPort: 3000
+  selector:
+    app: {{ .Release.Name }}-budcustomer
+  type: ClusterIP
+{{- if and .Values.microservices.budcustomer.autoscaling .Values.microservices.budcustomer.autoscaling.enabled }}
+---
+{{- include "bud.hpa" (dict "serviceName" "budcustomer" "Values" .Values "Release" .Release) }}
+{{- end }}
+{{ end }}

@@ -1,0 +1,9 @@
+harbor:
+  portal:
+    replicas: 1
+  core:
+    replicas: 1
+  jobservice:
+    replicas: 1
+  registry:
+    replicas: 1

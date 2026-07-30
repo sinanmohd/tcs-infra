@@ -1,0 +1,20 @@
+{{- range $name, $value := $.Values.instance }}
+apiVersion: valkey.io/v1alpha1
+kind: ValkeyCluster
+metadata:
+  name: {{ $name | quote }}
+spec:
+  {{- $value | toYaml | nindent 2 }}
+  exporter:
+    enabled: false
+  affinity:
+    podAntiAffinity:
+      preferredDuringSchedulingIgnoredDuringExecution:
+        - podAffinityTerm:
+            topologyKey: kubernetes.io/hostname
+            labelSelector:
+              matchLabels:
+                app.kubernetes.io/name: "valkey"
+          weight: 100
+---
+{{- end }}

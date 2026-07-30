@@ -1,0 +1,22 @@
+velero:
+  snapshotsEnabled: false
+  deployNodeAgent: true
+  configuration:
+    volumeSnapshotLocation: []
+    backupStorageLocation:
+      - name: "backblaze-b2"
+        provider: "aws"
+        bucket: "bud.studio"
+        default: true
+        prefix: "velero/k8s.bud.studio"
+        config:
+          checksumAlgorithm: ""
+          s3Url: "https://s3.us-east-005.backblazeb2.com"
+
+  initContainers:
+    - name: velero-plugin-for-aws
+      image: velero/velero-plugin-for-aws:v1.13.1
+      imagePullPolicy: IfNotPresent
+      volumeMounts:
+        - mountPath: /target
+          name: plugins

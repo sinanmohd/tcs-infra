@@ -1,0 +1,248 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Release.Name }}-budgateway-config
+data:
+  tensorzero.toml: |
+    [gateway]
+    bind_address = "0.0.0.0:3000"
+    debug = false
+
+    [gateway.rate_limits]
+    enabled = true
+
+    [gateway.blocking]
+    enabled = true
+
+    [gateway.cors]
+    # Answer browser CORS preflight (OPTIONS) before auth runs; otherwise
+    # require_api_key returns 401 for the preflight (no Authorization header)
+    # and the browser blocks the real request.
+    enabled = true
+    # Empty list (or ["*"]) means "any origin". Safe as a default because auth
+    # travels in the Authorization header (not cookies) and allow_credentials is
+    # off — so CSRF-style origin spoofing gains nothing. Tighten to an explicit
+    # list if you run untrusted endpoints that issue long-lived bearer tokens.
+    allowed_origins = []
+    allowed_methods = ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"]
+    # Empty means "any header". Gateway already gates on a valid API key, so
+    # arbitrary cross-origin headers can't escalate.
+    allowed_headers = []
+    expose_headers = ["x-tensorzero-gateway-version"]
+    # Keep off unless you're serving cookie-authenticated clients; the CORS spec
+    # forbids combining allow_credentials with wildcard origins/headers.
+    allow_credentials = false
+    max_age_seconds = 3600
+
+    [gateway.analytics]
+    enabled = true
+    geoip_db_path = "/app/geo/GeoLite2-City.mmdb"
+
+    [gateway.observability]
+    enabled = false
+    async_writes = true
+
+    [gateway.observability.kafka]
+    enabled = true
+    brokers = {{ $.Values.externalServices.kafka.endpoint | quote }}
+    topic_prefix = {{ $.Values.externalServices.kafka.topics.budgateway | quote }}
+    compression_type = "lz4"
+    batch_size = 1000
+    linger_ms = 10
+    security_protocol = "SASL_PLAINTEXT"
+
+    [gateway.observability.kafka.sasl]
+    mechanism = "SCRAM-SHA-512"
+    username = "{{ $.Values.externalServices.kafka.auth.username }}"
+    password = "{{ $.Values.externalServices.kafka.auth.password }}"
+
+    [object_storage]
+    type = "disabled"
+
+    [gateway.otlp_proxy]
+    enabled = true
+
+    [gateway.export.otlp.traces]
+    enabled = true
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-budgateway
+  annotations:
+    {{- range $key, $value := .Values.deploymentAnnotations }}
+    {{ $key }}: {{ $value | quote }}
+    {{- end }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: {{ .Release.Name }}-budgateway
+  template:
+    metadata:
+      labels:
+        app: {{ .Release.Name }}-budgateway
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- $nodeSelector := include "bud.nodeSelector" (dict "service" .Values.microservices.budgateway "global" .Values.global "context" $) }}
+      {{- if $nodeSelector }}
+      nodeSelector:
+        {{- $nodeSelector | nindent 8 }}
+      {{- end }}
+      {{- $affinity := include "bud.affinity" (dict "service" .Values.microservices.budgateway "global" .Values.global "context" $) }}
+      {{- if $affinity }}
+      affinity:
+        {{- $affinity | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: budgateway
+          image: {{ .Values.microservices.budgateway.image }}
+          imagePullPolicy: {{ .Values.imagePullPolicy }}
+          command: ["gateway"]
+          args:
+            - --config-file=/app/config/tensorzero.toml
+          ports:
+            - containerPort: 3000
+          env:
+            - name: TENSORZERO_REDIS_URL
+              value: "redis://default:{{ $.Values.externalServices.valkey.password }}@{{ $.Values.externalServices.valkey.host }}:{{ $.Values.externalServices.valkey.port }}/{{ $.Values.externalServices.valkey.databases.budgateway }}"
+            # Semantic-router HTTP dispatch URL (FRD W3.2). Empty/unset → gateway
+            # short-circuits to candidate_endpoints[0] without calling SR.
+            - name: TENSORZERO_SEMANTIC_ROUTER_URL
+              value: "http://{{ .Release.Name }}-semantic-router.{{ .Release.Namespace }}.svc:{{ .Values.microservices.semanticRouter.service.apiPort | default 8080 }}"
+            # FRD §W2.5: total deadline gateway gives SR's /v1/route/request.
+            # Sized for the orchestrating-path worst case (default 30s); the
+            # decision-only target is enforced via metrics, not this cap.
+            - name: TENSORZERO_SR_REQUEST_TIMEOUT_MS
+              value: {{ .Values.microservices.semanticRouter.orchestratingTimeoutMs | default 30000 | quote }}
+            # FRD §W2.6: timeout for the fire-and-forget /v1/route/response
+            # write-back. Best-effort; never blocks the client response.
+            - name: TENSORZERO_SR_RESPONSE_TIMEOUT_MS
+              value: {{ .Values.microservices.semanticRouter.responseTimeoutMs | default 2000 | quote }}
+            # FRD §W2.5: HTTP/2 idle connection pool sized for orchestrating
+            # fan-out (default 32). Tune via Q1 / perf smoke results.
+            - name: TENSORZERO_SR_CONNECTION_POOL_SIZE
+              value: {{ .Values.microservices.semanticRouter.connectionPoolSize | default 32 | quote }}
+            # FRD §7 risk-row: cap streaming tee buffer to bound memory
+            # under pathological response sizes; oversized responses
+            # bypass write-back rather than failing the client stream.
+            - name: TENSORZERO_SR_TEE_MAX_BYTES
+              value: {{ .Values.microservices.semanticRouter.teeMaxBytes | default 1048576 | quote }}
+            - name: TENSORZERO_RSA_PRIVATE_KEY_PATH
+              value: /app/keys/rsa-private-key.pem
+            - name: TENSORZERO_RSA_PRIVATE_KEY_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Release.Name }}-rsa-keys
+                  key: private-key-password
+            - name: OTEL_EXPORTER_OTLP_TRACES_ENDPOINT
+              value: "http://{{ $.Release.Name }}-otel-collector:4317"
+            - name: OTEL_EXPORTER_OTLP_HTTP_ENDPOINT
+              value: "http://{{ $.Release.Name }}-otel-collector:4318"
+            # OTel semconv resource attrs (spec 004). service.namespace groups
+            # bud services in Tempo/Jaeger; deployment.environment.name is the
+            # semconv-native env key; service.version is the image tag.
+            # The opentelemetry SDK reads OTEL_RESOURCE_ATTRIBUTES and merges
+            # these onto the Resource for every emitted span.
+            - name: OTEL_RESOURCE_ATTRIBUTES
+              value: "service.namespace=bud,deployment.environment.name={{ .Values.environment | default "dev" }},service.version={{ (splitList ":" .Values.microservices.budgateway.image) | last }}"
+          {{ $root := . }}
+          {{- range $key, $value := .Values.microservices.budgateway.env }}
+            - name: {{ $key }}
+              value: {{ tpl $value $root | quote }}
+          {{- end }}
+          volumeMounts:
+            - name: {{ .Release.Name }}-budgateway-config
+              mountPath: /app/config
+            - name: rsa-keys
+              mountPath: /app/keys
+          {{- with .Values.microservices.budgateway.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+      volumes:
+        - name: {{ .Release.Name }}-budgateway-config
+          configMap:
+            name: {{ .Release.Name }}-budgateway-config
+        - name: rsa-keys
+          secret:
+            secretName: {{ .Release.Name }}-rsa-keys
+            defaultMode: 0444
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Release.Name }}-budgateway
+  labels:
+    app: {{ .Release.Name }}-budgateway
+spec:
+  selector:
+    app: {{ .Release.Name }}-budgateway
+  ports:
+    - name: http
+      protocol: TCP
+      port: 3000
+      targetPort: 3000
+---
+{{- if .Values.microservices.budgateway.autoscaling.enabled }}
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: {{ .Release.Name }}-budgateway
+  labels:
+    app: {{ .Release.Name }}-budgateway
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: {{ .Release.Name }}-budgateway
+  minReplicas: {{ .Values.microservices.budgateway.autoscaling.minReplicas | default 1 }}
+  maxReplicas: {{ .Values.microservices.budgateway.autoscaling.maxReplicas | default 10 }}
+  metrics:
+    {{- if .Values.microservices.budgateway.autoscaling.targetCPUUtilizationPercentage }}
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: {{ .Values.microservices.budgateway.autoscaling.targetCPUUtilizationPercentage }}
+    {{- end }}
+    {{- if .Values.microservices.budgateway.autoscaling.targetMemoryUtilizationPercentage }}
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: {{ .Values.microservices.budgateway.autoscaling.targetMemoryUtilizationPercentage }}
+    {{- end }}
+    {{- if .Values.microservices.budgateway.autoscaling.prometheusMetrics.enabled }}
+    - type: Pods
+      pods:
+        metric:
+          name: {{ .Values.microservices.budgateway.autoscaling.prometheusMetrics.metricName | default "gateway_processing_seconds_p95" }}
+        target:
+          type: AverageValue
+          averageValue: {{ .Values.microservices.budgateway.autoscaling.prometheusMetrics.targetValue | default "50m" }}
+    {{- end }}
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: {{ .Values.microservices.budgateway.autoscaling.scaleDownStabilizationSeconds | default 300 }}
+      policies:
+        - type: Percent
+          value: 50
+          periodSeconds: 60
+    scaleUp:
+      stabilizationWindowSeconds: {{ .Values.microservices.budgateway.autoscaling.scaleUpStabilizationSeconds | default 0 }}
+      policies:
+        - type: Percent
+          value: 100
+          periodSeconds: 5
+        - type: Pods
+          value: 4
+          periodSeconds: 5
+      selectPolicy: Max
+{{- end }}

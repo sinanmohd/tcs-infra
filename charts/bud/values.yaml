@@ -1,0 +1,1457 @@
+global:
+  ingress:
+    hosts:
+      root: "bud.lan"
+      budadmin: ""
+      budcustomer: ""
+      budplayground: ""
+      budapp: ""
+      budgateway: ""
+      budask: ""
+      budnotify: ""
+      novuapi: ""
+      novuws: ""
+      s3: ""
+      mcpgateway: ""
+      onyx: ""
+  nodeSelector: {}
+  affinity:
+    nodeAffinity:
+      preferredDuringSchedulingIgnoredDuringExecution:
+        - weight: 50
+          preference:
+            matchExpressions:
+              - key: bud.studio/control-plane
+                operator: In
+                values:
+                  - "true"
+registries:
+  registry.bud.studio:
+    username: getmefrombud
+    password: getmefrombud
+imagePullSecrets:
+  - name: registry.bud.studio
+imagePullPolicy: "IfNotPresent"
+deploymentAnnotations: {}
+appApiToken: "PRAJKQIzAsDNvHIrYALkTiwm5t6VNmnW"
+storage:
+  budmodelRegistry:
+    className: ""
+    size: 60Gi
+  budmodelAddDir:
+    className: ""
+    size: 20Gi
+  budevalDataset:
+    className: ""
+    size: 32Gi
+    accessMode: ReadWriteOnce
+  budappStaticDir:
+    className: ""
+    size: 20Gi
+externalServices:
+  s3:
+    endpoint: "seaweed-s3.seaweedfs:8333"
+    secure: false
+    auth:
+      accessKey: "bud"
+      secretKey: "bud"
+    buckets:
+      modelRegistry: "bud-models-registry"
+      modelInfo: "bud-model-info"
+      novu: "bud-novu"
+  mongodb:
+    endpoint: "mongodb-rs0.mongodb:27017"
+    auth:
+      username: "bud_novu"
+      password: "bud_novu"
+    databases:
+      novu: "bud_novu"
+  valkey:
+    host: "valkey-master.valkey"
+    port: 6379
+    password: "valkey"
+    databases:
+      config_store: 3
+      state_store: 4
+      novu: 5
+      budgateway: 6
+      mcpgateway: 7
+      budprompt: 8
+      global: 9
+      onyx: 10
+      budcodeinterpreter: 11
+  clickhouse:
+    host: "clickhouse-clickhouse.clickhouse"
+    port: 9000
+    auth:
+      username: bud
+      password: bud
+    databases:
+      budeval: "bud_eval"
+      budgateway: "bud_gateway"
+      budmetrics: "metrics"
+  oidc:
+    url: "http://auth.bud.lan/realms/bud-keycloak"
+    clients:
+      mcpgateway:
+        id: mcp-gateway
+        secret: mcp-gateway
+  # Keycloak server itself (base URL, no /realms suffix). The per-env SOPS secrets
+  # file already overlays url and clients.mcpgateway.secret; these are the defaults.
+  # Consumed by the mcpgateway deployment for its SSO_KEYCLOAK_* provider, which
+  # needs the base URL + realm split (issuer discovery + role sync) rather than the
+  # combined realm URL that the generic OIDC block uses.
+  keycloak:
+    url: "http://auth.bud.lan"
+    realm: "bud-keycloak"
+    clients:
+      mcpgateway:
+        id: mcp-gateway
+        secret: mcp-gateway
+  kafka:
+    endpoint: "kafka-kafka-brokers.kafka:9092"
+    auth:
+      username: "bud"
+      password: "bud"
+    topics:
+      pubsub: "bud_pubsub"
+      budgateway: "bud_gateway"
+  postgresql:
+    host: "pooler-rw.postgres"
+    port: 5432
+    databases:
+      budask:
+        name: "budask"
+        username: "bud"
+        password: "bud"
+      budapp:
+        name: "budapp"
+        username: "bud"
+        password: "bud"
+      budcluster:
+        name: "budcluster"
+        username: "bud"
+        password: "bud"
+      budmetrics:
+        name: "budmetrics"
+        username: "bud"
+        password: "bud"
+      budmodel:
+        name: "budmodel"
+        username: "bud"
+        password: "bud"
+      budsim:
+        name: "budsim"
+        username: "bud"
+        password: "bud"
+      budeval:
+        name: "budeval"
+        username: "bud"
+        password: "bud"
+      buddoc:
+        name: "buddoc"
+        username: "bud"
+        password: "bud"
+      budprompt:
+        name: "budprompt"
+        username: "bud"
+        password: "bud"
+      budcodeinterpreter:
+        name: "budcodeinterpreter"
+        username: "bud"
+        password: "bud"
+      mcpgateway:
+        name: "mcpgateway"
+        username: "bud"
+        password: "bud"
+        host: "pooler-rw-txn.postgres"
+      budpipeline:
+        name: "budpipeline"
+        username: "bud"
+        password: "bud"
+      budevent:
+        name: "budevent"
+        username: "bud"
+        password: "bud"
+      onyx:
+        name: "onyx"
+        username: "bud"
+        password: "bud"
+novu:
+  store:
+    encryption-key: bud-gUXY7j0k14yinhZm4w!eSqBGlexz
+  ws:
+    image:
+      registry: registry.bud.studio
+      repository: novu/ws
+      tag: 0.24.0
+  worker:
+    image:
+      registry: registry.bud.studio
+      repository: novu/worker
+      tag: 0.24.0
+  web:
+    image:
+      registry: registry.bud.studio
+      repository: novu/web
+      tag: 0.24.0
+  api:
+    image:
+      registry: registry.bud.studio
+      repository: novu/api
+      tag: 0.24.0
+    env:
+      DISABLE_USER_REGISTRATION: false
+      REDIS_DB_INDEX: "5"
+  externalDatabase:
+    host: "mongodb-rs0.mongodb"
+    username: "bud_novu"
+    password: "bud_novu"
+    database: "bud_novu"
+  externalRedis:
+    host: "valkey-master.valkey"
+    existingSecret: "{{ $.Release.Name }}-novu-externalredis"
+  externalS3:
+    existingSecret: "{{ $.Release.Name }}-novu-externals3"
+    bucketName: "bud-novu"
+novuExtra:
+  email: root@example.com
+  password: fomah4OiKaesh6azChoh7uoM
+ingress:
+  enabled: true
+  https: internal
+usecases:
+  domain: ""
+microservices:
+  rsaKeys:
+    privateKeyPassword: ccHGQlmO8HcUqOjU2kUh4PFmoSuxzY0Z
+    privateKey: |
+      -----BEGIN ENCRYPTED PRIVATE KEY-----
+      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
+      -----END ENCRYPTED PRIVATE KEY-----
+    publicKey: |
+      -----BEGIN PUBLIC KEY-----
+      MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAlKXTX2N7bKJabgMdT2m5
+      xhmVW+td8KTS3sqMjHJvJM8pJ5qucuqIk7n9fakrJNScdtMMi328F6oK/9PHiqG6
+      aaMa2tbuPn7IRluMD0QwWIP7i5kZeDxB013Q/uvkGEYXR1t8aXCwb+RqeeUS+E26
+      EZ4KkwWv/NqLGEix2MdmpzFhOpcMgVtVsggKrgv+KcL+nMXGiPp5gDYc5/q2cUu7
+      t+pJqo2DehtcQse6b38kZLhr7naKZ7WCRi2guMp01VzaDDzY6Vr1fLK5BYkLLDEe
+      27Wjtgwmfea3WlyQLYgYreffaT73xJhLDqFKaCT27F+sQIOE8MI0VER0bR8gsaWn
+      NwIDAQAB
+      -----END PUBLIC KEY-----
+  budadmin:
+    enabled: true
+    image: registry.bud.studio/runtime/budadmin:1.1.0
+    env:
+    nodeSelector: {}
+    affinity: {}
+    resources:
+      requests:
+        memory: 131Mi
+      limits:
+        memory: 1Gi
+    autoscaling:
+      enabled: false
+      minReplicas: 1
+      maxReplicas: 3
+      targetCPUUtilizationPercentage: 70
+      targetMemoryUtilizationPercentage: 80
+      scaleDownStabilizationSeconds: 300
+      scaleUpStabilizationSeconds: 30
+  budcustomer:
+    enabled: true
+    image: registry.bud.studio/runtime/budcustomer:1.1.0
+    env: {}
+    nodeSelector: {}
+    affinity: {}
+    resources:
+      requests:
+        memory: 370Mi
+      limits:
+        memory: 1Gi
+    autoscaling:
+      enabled: false
+      minReplicas: 1
+      maxReplicas: 3
+      targetCPUUtilizationPercentage: 70
+      targetMemoryUtilizationPercentage: 80
+      scaleDownStabilizationSeconds: 300
+      scaleUpStabilizationSeconds: 30
+  budplayground:
+    enabled: true
+    image: registry.bud.studio/runtime/budplayground:1.1.0
+    env: {}
+    nodeSelector: {}
+    affinity: {}
+    resources:
+      requests:
+        memory: 234Mi
+      limits:
+        memory: 1Gi
+    autoscaling:
+      enabled: false
+      minReplicas: 1
+      maxReplicas: 2
+      targetCPUUtilizationPercentage: 70
+      targetMemoryUtilizationPercentage: 80
+      scaleDownStabilizationSeconds: 300
+      scaleUpStabilizationSeconds: 30
+  budgateway:
+    enabled: true
+    image: registry.bud.studio/runtime/budgateway:1.1.0
+    env:
+      # Distributed-trace content capture (see microservices.budprompt.env for the full note).
+      # DEBUG-FIRST: full LLM request/response bodies + messages recorded on spans by default.
+      # Set BUD_TRACE_CAPTURE_CONTENT "false" for client/compliance installs to stop recording
+      # body/message content. Secret-keyed values ALWAYS redacted; bodies ALWAYS size-bounded
+      # (the gateway has no SDK value-length limit, so this app-side cap is the only backstop).
+      BUD_TRACE_CAPTURE_CONTENT: "true"
+      BUD_TRACE_BODY_MAX_BYTES: "262144"
+    nodeSelector: {}
+    affinity: {}
+    resources:
+      requests:
+        cpu: "1"
+        memory: 2Gi
+      limits:
+        cpu: "4"
+        memory: 8Gi
+    autoscaling:
+      enabled: true
+      minReplicas: 1
+      maxReplicas: 10
+      targetCPUUtilizationPercentage: 70
+      targetMemoryUtilizationPercentage: 80
+      # Custom-metric autoscaling DISABLED — the gateway scales on CPU/memory only.
+      # The gateway_processing_seconds_p95 metric mis-scaled the gateway to max
+      # replicas on any traffic, for two reasons:
+      #   1. targetValue "2m" is parsed by Kubernetes as 2 milli-units (0.002s),
+      #      NOT 2 minutes — so the real p95 (~300-500ms) always exceeded it.
+      #   2. gateway_processing_seconds is dominated by the synchronous
+      #      semantic-router hop (pre-model latency the gateway can't fix by
+      #      adding replicas), so it was never a gateway-saturation signal.
+      # Load testing to 8000 concurrent confirmed CPU/memory (memory-bound for this
+      # connection-holding gateway) scales it correctly 1->9 pods with no OOM/crash.
+      prometheusMetrics:
+        enabled: false
+        metricName: gateway_processing_seconds_p95
+        targetValue: "2m"
+      scaleDownStabilizationSeconds: 300
+      scaleUpStabilizationSeconds: 0
+  budsentinel:
+    enabled: true
+    image: registry.bud.studio/runtime/sentinel:nightly
+    env:
+      # Export guardrail spans + metrics to the shared OTel collector, in sync with
+      # the rest of the stack (collector -> ClickHouse -> budmetrics). Sentinel's
+      # exporter is OTLP/gRPC only, so it targets :4317 (like budgateway), not :4318.
+      BUD_OTEL_ENABLED: "1"
+      OTEL_EXPORTER_OTLP_ENDPOINT: "http://{{ $.Release.Name }}-otel-collector:4317"
+    nodeSelector: {}
+    affinity: {}
+    resources:
+      requests:
+        memory: 4Gi
+      limits:
+        memory: 8Gi
+  semanticRouter:
+    enabled: true
+    image: registry.bud.studio/runtime/semantic-router:1.1.0
+    replicas: 1
+    env: {}
+    nodeSelector: {}
+    affinity: {}
+    resources:
+      requests:
+        memory: 6Gi
+        cpu: "1"
+      limits:
+        memory: 16Gi
+        cpu: "4"
+    requestTimeoutMs:
+      hard: 500
+      retry: 200
+    orchestratingTimeoutMs: 300000
+    maxOrchestratedCalls: 10
+    connectionPoolSize: 32
+    teeMaxBytes: 16777216
+    responseTimeoutMs: 2000
+    configSource:
+      type: redis
+      redis:
+        keyPrefix: "router_config:"
+    service:
+      apiPort: 8080
+      metricsPort: 9190
+      extprocPort: 50051
+    autoscaling:
+      enabled: false
+      minReplicas: 2
+      maxReplicas: 6
+      prometheusMetrics:
+        enabled: true
+        metricName: sr_in_flight_requests
+        targetValue: "8"
+      targetMemoryUtilizationPercentage: 90
+      scaleDownStabilizationSeconds: 600
+      scaleUpStabilizationSeconds: 30
+  mcpgateway:
+    enabled: true
+    image: registry.bud.studio/runtime/mcpgateway:latest
+    env:
+      BASIC_AUTH_USER: root
+      BASIC_AUTH_PASSWORD: d7T%wlDmV8J3D4zyv%yPEI7v
+      JWT_SECRET_KEY: 3OKnSQZUB3?HU6QwisONaPz2iXD9b56%
+      PLATFORM_ADMIN_EMAIL: root@example.com
+      PLATFORM_ADMIN_PASSWORD: VNZhTJ4JKmtjEaTMYaT=y1Dm
+      AUTH_ENCRYPTION_SECRET: HgDpoU11iUMTWTNW6QL4o33LEnSY0e35
+      OBSERVABILITY_ENABLED: "false"
+      DB_POOL_SIZE: "10"
+      DB_MAX_OVERFLOW: "5"
+      DB_POOL_TIMEOUT: "5"
+      # Event webhooks to budprompt (trigger/channel flows). The egress allowlist is
+      # release-name-prefixed because pde-* releases deploy the same chart under
+      # their own release names.
+      MCPGATEWAY_EVENTS_ENABLED: "true"
+      MCPGATEWAY_EVENTS_EGRESS_ALLOW_HOSTS: "{{ .Release.Name }}-budprompt"
+      # Prometheus exporter (mcpgateway/services/metrics.py), not the admin Metrics tab.
+      ENABLE_METRICS: "false"
+    ssrfProtectionEnabled: false
+    sso:
+      enabled: true
+      initImage: "alpine:3.19"
+      externalJwtValidation: "true"
+    nodeSelector: {}
+    affinity: {}
+    resources:
+      requests:
+        cpu: 500m
+        memory: 399Mi
+      limits:
+        memory: 1Gi
+    autoscaling:
+      enabled: false
+      minReplicas: 1
+      maxReplicas: 3
+      targetCPUUtilizationPercentage: 70
+      targetMemoryUtilizationPercentage: 75
+      scaleDownStabilizationSeconds: 300
+      scaleUpStabilizationSeconds: 30
+  askbud:
+    enabled: true
+    image: registry.bud.studio/runtime/askbud:1.1.0
+    daprid: askbud
+    model: bud-gpt-oss-20b-ada28b58
+    env:
+      INFERENCE_API_KEY: "test"
+      INFERENCE_URL: http://52.241.253.58/v1/
+    nodeSelector: {}
+    affinity: {}
+    resources:
+      requests:
+        memory: 153Mi
+      limits:
+        memory: 1Gi
+    autoscaling:
+      enabled: false
+      minReplicas: 1
+      maxReplicas: 3
+      targetCPUUtilizationPercentage: 70
+      targetMemoryUtilizationPercentage: 75
+      scaleDownStabilizationSeconds: 300
+      scaleUpStabilizationSeconds: 30
+  budapp:
+    enabled: true
+    image: registry.bud.studio/runtime/budapp:1.1.0
+    daprid: budapp
+    psqlHost: "pooler-rw-txn.postgres"
+    corsOrigins:
+      - "http://localhost:3000"
+      - "http://localhost:3001"
+    redirectFlow:
+      sessionSecret: OGdfyN24WWs0qgEmL5oHAccivOH52drnECk4BaVvNhljFTz4AxTCBmAaSU3DHQpV
+      sessionTtlSeconds: 43200
+      sessionCookieName: "__Host-bud_session"
+      csrfCookieName: "__Host-bud_csrf"
+      pkceCookieName: "__Host-budauth_pkce"
+      defaultClientId: budadmin-web
+      defaultClientSecret: budadmin-web
+      # budapp-admin (bundled-Keycloak provisioning). Activates only when adminClientSecret
+      # (per-env, in secrets.bud.yaml) AND realm SMTP are set; F4 keeps it off for non-Keycloak
+      # issuers. Empty secret = off (NullProvisioner). The budapp-admin client itself is defined
+      # in the keycloak chart (values.budruntime.yaml + secrets.bud.yaml).
+      adminClientId: "budapp-admin"
+      adminClientSecret: ""
+      clientsByHostDefault: "budadmin"
+      clientsByHost:
+        budadmin:
+          clientId: budadmin-web
+          clientSecret: budadmin-web
+          hosts:
+            - '{{ include "bud.ingress.hosts.budadmin" . }}'
+          allowedReturnUrlOrigins:
+            - '{{ include "bud.ingress.url.budadmin" . }}'
+          # Admin console admits ADMIN users only — a CLIENT completing login here is
+          # refused at /callback (they belong on the customer portal).
+          allowedUserTypes:
+            - admin
+        budcustomer:
+          clientId: budcustomer-web
+          clientSecret: budcustomer-web
+          hosts:
+            - '{{ include "bud.ingress.hosts.budcustomer" . }}'
+          allowedReturnUrlOrigins:
+            - '{{ include "bud.ingress.url.budcustomer" . }}'
+          # Customer portal admits CLIENT and ADMIN (ADMIN is a superset).
+          allowedUserTypes:
+            - client
+            - admin
+        budplayground:
+          clientId: budplayground-web
+          clientSecret: budplayground-web
+          hosts:
+            - '{{ include "bud.ingress.hosts.budplayground" . }}'
+          allowedReturnUrlOrigins:
+            - '{{ include "bud.ingress.url.budplayground" . }}'
+            # Playground is unrestricted (empty = any user_type).
+      enabled: true
+    env:
+      JWT_SECRET_KEY: 1Fb7H2S7o4G5oUAcfsDFbrfJ3Y5XmULbnbanvF7BsyBiq8lBekd2JsWEK6TQNkJn
+      HF_TOKEN: <change_me>
+      GRAFANA_USERNAME: bud-runtime
+      GRAFANA_PASSWORD: ZvJgAPzlpUFdihc9a0fgtmY5c9inzFho
+      AES_KEY_HEX: 5b9b01f334a2d982dcc0b56956b70e5a673165a827aa9a0f8e6df5ca61ecfa6651e655105ac2be577ff34038
+      GRAFANA_SCHEME: http
+      GRAFANA_URL: "{{ $.Release.Name }}-grafana"
+      OIDC_ISSUER: "{{ $.Values.externalServices.oidc.url }}"
+      OIDC_ROLES_CLAIM_PATH: "realm_access.roles"
+      OIDC_ACCOUNT_MANAGEMENT_URL: "{{ $.Values.externalServices.oidc.url }}/account"
+      OIDC_VERIFY_SSL: "false"
+      # Keycloak set-password/verify-email link lifespan (seconds); 12h.
+      KEYCLOAK_ACTION_EMAIL_LIFESPAN_SECONDS: "43200"
+      DEFAULT_REALM_NAME: bud-keycloak
+      DEFAULT_CLIENT_NAME: budadmin-web
+      CLOUD_MODEL_SEEDER_ENGINE: tensorzero
+      BUD_CONNECT_BASE_URL: https://budconnect.bud.studio
+      BUD_DOC_SERVICE_URL: "http://{{ $.Release.Name }}-buddoc:9081"
+      BUD_PROMPT_SERVICE_URL: "http://{{ $.Release.Name }}-budprompt:3015/"
+      BUDGATEWAY_BASE_URL: "http://{{ $.Release.Name }}-budgateway:3000"
+      ROUTER_SYNC_BOOT_VERIFY_REDIS: "false"
+    nodeSelector: {}
+    affinity: {}
+    resources:
+      requests:
+        memory: 479Mi
+      limits:
+        memory: 1Gi
+    autoscaling:
+      enabled: false
+      minReplicas: 1
+      maxReplicas: 5
+      targetCPUUtilizationPercentage: 70
+      targetMemoryUtilizationPercentage: 75
+      scaleDownStabilizationSeconds: 300
+      scaleUpStabilizationSeconds: 30
+  budcluster:
+    enabled: true
+    image: registry.bud.studio/runtime/budcluster:1.1.0
+    daprid: budcluster
+    registerDefaultCluster:
+      enabled: true
+      clusterName: "Control Plane"
+      clusterIcon: "\U0001F3E0"
+      ingressUrl: ""
+      token: "4NuuIjFVXRV1RH5Ss6swKJfW2iq2rEQmPf0WQR1LdMZVElqW"
+      image: curlimages/curl:8.10.1
+      backoffLimit: 6
+    env:
+      LOG_LEVEL: INFO
+      CRYPTO_NAME: "{{ .Release.Name }}-crypto"
+      RSA_KEY_NAME: rsa-private-key.pem
+      VOLUME_TYPE: local
+      CONFIGSTORE_NAME: "{{ .Release.Name }}-configstore"
+      SECRETSTORE_SECRET_NAME: "{{ .Release.Name }}-secretstore"
+      STATESTORE_NAME: "{{ .Release.Name }}-dapr-statestore"
+      VALIDATE_CERTS: "false"
+      NODE_INFO_COLLECTOR_IMAGE_CPU: budstudio/node-info-collector-cpu:0.1.0
+      NODE_INFO_COLLECTOR_IMAGE_CUDA: budimages.azurecr.io/budecosystem/node-info-collector-cuda:latest
+      NODE_INFO_COLLECTOR_IMAGE_HPU: budimages.azurecr.io/budecosystem/node-info-collector-hpu:latest
+      NODE_INFO_LABELER_IMAGE: budimages.azurecr.io/budecosystem/node-device-labeler:latest
+      QUANTIZATION_JOB_IMAGE: registry.bud.studio/runtime/bud-quantization-cpu:0.04
+      ENGINE_CONTAINER_PORT: "8000"
+      REGISTRY_SERVER: https://budimages.azurecr.io
+      METRICS_COLLECTION_ENABLED: "true"
+      METRICS_COLLECTION_TIMEOUT: "30"
+      METRICS_BATCH_SIZE: "20000"
+      OTEL_COLLECTOR_ENDPOINT: "http://{{ $.Release.Name }}-otel-collector:4318"
+      PROMETHEUS_SERVICE_NAME: "bud-metrics-kube-prometheu-prometheus"
+      PROMETHEUS_NAMESPACE: "bud-system"
+      PROMETHEUS_PORT: "9090"
+    nodeSelector: {}
+    affinity: {}
+    resources:
+      requests:
+        memory: 2434Mi
+      limits:
+        memory: 8Gi
+    autoscaling:
+      enabled: false
+      minReplicas: 1
+      maxReplicas: 3
+      targetCPUUtilizationPercentage: 80
+      targetMemoryUtilizationPercentage: 70
+      scaleDownStabilizationSeconds: 600
+      scaleUpStabilizationSeconds: 60
+  budmetrics:
+    enabled: true
+    daprid: budmetrics
+    image: registry.bud.studio/runtime/budmetrics:1.1.0
+    env:
+      INFERENCE_URL: http://172.184.137.177:8502/classify
+    # Phase-2 steady-state settle cron. Runs `migrate_clickhouse.py --settle-cycle` on a schedule so
+    # the coalescing fact tables (InferenceFact / AgentInvocationFact) and TraceSummary keep advancing
+    # after the cutover. Single-writer via concurrencyPolicy: Forbid. Set enabled: false to turn off
+    # (e.g. if PHASE2_* is disabled via env).
+    settleCron:
+      enabled: true
+      schedule: "* * * * *"
+      activeDeadlineSeconds: 240
+      startingDeadlineSeconds: 60
+      successfulJobsHistoryLimit: 1
+      failedJobsHistoryLimit: 3
+      resources: {}
+    nodeSelector: {}
+    affinity: {}
+    resources:
+      requests:
+        memory: 140Mi
+      limits:
+        memory: 1Gi
+    autoscaling:
+      enabled: false
+      minReplicas: 1
+      maxReplicas: 3
+      targetCPUUtilizationPercentage: 70
+      targetMemoryUtilizationPercentage: 80
+      scaleDownStabilizationSeconds: 300
+      scaleUpStabilizationSeconds: 30
+  budmodel:
+    enabled: true
+    image: registry.bud.studio/runtime/budmodel:1.1.0
+    daprid: budmodel
+    env:
+      LOG_LEVEL: INFO
+    nodeSelector: {}
+    affinity: {}
+    resources:
+      requests:
+        memory: 1470Mi
+      limits:
+        memory: 4Gi
+    autoscaling:
+      enabled: false
+      minReplicas: 1
+      maxReplicas: 2
+      targetCPUUtilizationPercentage: 60
+      targetMemoryUtilizationPercentage: 70
+      scaleDownStabilizationSeconds: 300
+      scaleUpStabilizationSeconds: 60
+    preflight:
+      enabled: true
+      registryMaxSize: 500
+      capacityProvider: "auto"
+      prometheusUrl: ""
+      registryPvc:
+        name: ""
+        namespace: ""
+      s3Metrics:
+        url: ""
+        tokenSecretRef:
+          name: ""
+          key: ""
+      headroom:
+        pct: "0.10"
+        minBytes: "268435456"
+      capacityQueryTimeoutSeconds: "3.0"
+      strictUnknown: false
+      reservation:
+        maxAgeHours: 24
+        purgeAgeDays: 7
+  budeval:
+    enabled: false
+    image: registry.bud.studio/runtime/budeval:1.1.0
+    daprid: budeval
+    env: {}
+    nodeSelector: {}
+    affinity: {}
+    resources:
+      requests:
+        memory: 1470Mi
+      limits:
+        memory: 4Gi
+    autoscaling:
+      enabled: false
+      minReplicas: 1
+      maxReplicas: 2
+      targetCPUUtilizationPercentage: 75
+      targetMemoryUtilizationPercentage: 80
+      scaleDownStabilizationSeconds: 600
+      scaleUpStabilizationSeconds: 60
+  budsim:
+    enabled: true
+    image: registry.bud.studio/runtime/budsim:1.1.0
+    daprid: budsim
+    env:
+      LOG_LEVEL: INFO
+    nodeSelector: {}
+    affinity: {}
+    resources:
+      requests:
+        memory: 999Mi
+      limits:
+        memory: 4Gi
+    autoscaling:
+      enabled: false
+      minReplicas: 1
+      maxReplicas: 3
+      targetCPUUtilizationPercentage: 75
+      targetMemoryUtilizationPercentage: 80
+      scaleDownStabilizationSeconds: 600
+      scaleUpStabilizationSeconds: 60
+  buddoc:
+    enabled: true
+    image: registry.bud.studio/runtime/buddoc:1.1.0
+    daprid: buddoc
+    env:
+      LOG_LEVEL: INFO
+      VLM_API_URL: "http://{{ $.Release.Name }}-budgateway:3000/v1/chat/completions"
+      VLM_API_TIMEOUT: "300"
+      MAX_FILE_SIZE_MB: "50"
+      TEMP_UPLOAD_DIR: /tmp/buddoc_uploads
+    nodeSelector: {}
+    affinity: {}
+    resources:
+      requests:
+        memory: 630Mi
+      limits:
+        memory: 4Gi
+    autoscaling:
+      enabled: false
+      minReplicas: 1
+      maxReplicas: 2
+      targetCPUUtilizationPercentage: 60
+      targetMemoryUtilizationPercentage: 70
+      scaleDownStabilizationSeconds: 300
+      scaleUpStabilizationSeconds: 60
+  budnotify:
+    enabled: true
+    image: registry.bud.studio/runtime/budnotify:1.1.0
+    daprid: budnotify
+    pubsubTopic: notificationMessages
+    env:
+      STORE_ENCRYPTION_KEY: CFMryQwA8pSTPcx8nnueChg3b8P9tdH4
+      JWT_SECRET: E4gwGDsrHSddakY0rtzEE7LA7oqZIQZvxdGvYZdynisgFnhmeCWFNF6FrBmOxZH3
+      OIDC_ISSUER: "{{ $.Values.externalServices.oidc.url }}"
+      OIDC_VERIFY_SSL: "false"
+    nodeSelector: {}
+    affinity: {}
+    resources:
+      requests:
+        memory: 121Mi
+      limits:
+        memory: 1Gi
+    autoscaling:
+      enabled: false
+      minReplicas: 1
+      maxReplicas: 3
+      targetCPUUtilizationPercentage: 70
+      targetMemoryUtilizationPercentage: 75
+      scaleDownStabilizationSeconds: 300
+      scaleUpStabilizationSeconds: 0
+  budprompt:
+    enabled: true
+    daprid: budprompt
+    image: registry.bud.studio/runtime/budprompt:1.1.0
+    # Processes per pod (asyncio = 1 core/worker); set ~= 2x cpu limit. Each is a
+    # full ~300Mi process; WORKER_POOL_SIZE/BUD_GATEWAY_MAX_CONNECTIONS are PER WORKER.
+    uvicornWorkers: 4
+    # Runtime DB = transaction pooler (durable engine is one-txn-per-step, fence-based,
+    # so txn-pooler-safe); needs DB_STATEMENT_CACHE_SIZE=0. Migrations run on migrationPsqlHost.
+    psqlHost: "pooler-rw-txn.postgres"
+    migrationPsqlHost: "postgres-rw.postgres"
+    env:
+      LOG_LEVEL: INFO
+      BUD_GATEWAY_BASE_URL: http://{{ .Release.Name }}-budgateway:3000/v1
+      OTEL_SDK_DISABLED: "false"
+      OTEL_EXPORTER_OTLP_ENDPOINT: "http://{{ $.Release.Name }}-otel-collector:4318"
+      OTEL_INSTRUMENTATION_A2A_SDK_ENABLED: "false"
+      # Model-egress httpx pool, PER WORKER. Must be >= WORKER_POOL_SIZE; keep it
+      # per-worker-modest (httpcore scans the pool O(N)/request — go HTTP/2 to scale higher).
+      BUD_GATEWAY_MAX_CONNECTIONS: "320"
+      BUD_GATEWAY_MAX_KEEPALIVE_CONNECTIONS: "80"
+      BUD_GATEWAY_POOL_TIMEOUT_SECONDS: "30"
+      # Durable worker pool, PER WORKER. Per-pod concurrency = uvicornWorkers x WORKER_POOL_SIZE
+      # (~90 background runs/s per 2-core pod at a 10s model; CPU-bound, scales with cores/pods).
+      WORKER_POOL_SIZE: "256"
+      WORKER_CLAIM_BATCH: "32"
+      # Idle gap before a full worker re-claims freed slots (also the deadline-sweep interval).
+      SWEEP_INTERVAL_SECONDS: "2"
+      # Delay before a fresh pod's first claim — small so scale-up isn't stalled.
+      WORKER_COLDSTART_JITTER_SECONDS: "3"
+      # REQUIRED on the txn pooler: prepared statements are per-backend; 0 = anonymous.
+      DB_STATEMENT_CACHE_SIZE: "0"
+      # 1800 = code default; short recycles caused a synchronized boot-time reconnect
+      # storm through pgbouncer (wedge RCA P4). pre_ping catches stale conns cheaply.
+      DB_POOL_RECYCLE_SECONDS: "1800"
+      DB_POOL_PRE_PING: "true"
+      # Bound every DB wait (wedge RCA P3): a stall becomes a loud error, never a silent park.
+      DB_COMMAND_TIMEOUT_SECONDS: "60"
+      DB_POOL_TIMEOUT_SECONDS: "30"
+      # Bounded valkey pool, PER WORKER (per-pod conns = uvicornWorkers x this).
+      REDIS_MAX_CONNECTIONS: "80"
+      # Dedups the per-claim gateway api-key bypass SET (else a valkey write storm).
+      # MUST stay well below MAX_SUSPENSION_TTL_SECONDS (7d) so the bypass never lapses.
+      BYPASS_WRITE_DEDUP_TTL_SECONDS: "3600"
+      # OTel semconv resource attrs (spec 004). service.namespace groups all
+      # bud services in Tempo/Jaeger; deployment.environment.name is the
+      # semconv-native env key; service.version is the image tag so external
+      # viewers can pin a trace to a build. The SDK merges these onto every
+      # span's Resource.
+      OTEL_RESOURCE_ATTRIBUTES: 'service.namespace=bud,deployment.environment.name={{ .Values.environment | default "dev" }},service.version={{ (splitList ":" .Values.microservices.budprompt.image) | last }}'
+      # --- Distributed-trace content-capture controls (security / cost) ---
+      # DEBUG-FIRST DEFAULTS: full prompt/message/body content IS recorded on spans.
+      # For client/multi-tenant or compliance installs, set BUD_TRACE_CAPTURE_CONTENT
+      # "false" to STOP recording body/message/history content (ids, sizes, status,
+      # errors still recorded). Secret-keyed values (token/authorization/api_key/…) are
+      # ALWAYS redacted and bodies ALWAYS size-bounded regardless of this flag.
+      BUD_TRACE_CAPTURE_CONTENT: "true"
+      BUD_TRACE_BODY_MAX_BYTES: "262144"
+      # SDK backstop: hard cap on ANY span-attribute value length (honored by the OTel SDK).
+      OTEL_SPAN_ATTRIBUTE_VALUE_LENGTH_LIMIT: "32768"
+      # 100% kept (parentbased_always_on). To sample at production scale set
+      # "parentbased_traceidratio" + OTEL_TRACES_SAMPLER_ARG "0.25" (errors are not
+      # auto-kept by head sampling — prefer collector tail_sampling for that).
+      OTEL_TRACES_SAMPLER: "parentbased_always_on"
+    nodeSelector: {}
+    affinity: {}
+    # cpu drives throughput (~45 runs/s per core); memory must fit uvicornWorkers
+    # processes (~300Mi each) + held concurrency. Raise cpu + uvicornWorkers together.
+    resources:
+      requests:
+        cpu: "1"
+        memory: 1Gi
+      limits:
+        cpu: "2"
+        memory: 4Gi
+    autoscaling:
+      enabled: true
+      minReplicas: 1
+      maxReplicas: 10
+      # CPU only fires for fast models; slow models saturate slots first, so the
+      # pod metrics below are the primary signal (HPA takes the MAX across all).
+      targetCPUUtilizationPercentage: 60
+      # backlog_runs = durable queued+runnable (DB-wide); inflight_requests = held
+      # foreground requests (per-worker-process ≈ pod/uvicornWorkers).
+      podMetrics:
+        - name: budprompt_backlog_runs
+          target: "20"
+        - name: budprompt_inflight_requests
+          target: "80"
+      scaleDownStabilizationSeconds: 300
+      scaleUpStabilizationSeconds: 0
+  budcodeinterpreter:
+    enabled: false
+    daprid: budcodeinterpreter
+    image: registry.bud.studio/runtime/budcodeinterpreter:1.1.0
+    env:
+      LOG_LEVEL: INFO
+
+      OPENSANDBOX_DOMAIN: "opensandbox.bud.lan"
+      OPENSANDBOX_PROTOCOL: "http"
+      OPENSANDBOX_USE_SERVER_PROXY: "true"
+      SECRETS_OPENSANDBOX_API_KEY: "change_me_fiER89YrB8fsnizEqozepGIp6VxmTlDc"
+
+      E2B_DOMAIN: http://164.52.200.72:3000
+      E2B_SANDBOX_URL: http://164.52.200.72:3002
+      CODE_INTERPRETER_DEFAULT_TEMPLATE: code-interpreter-2g-2c
+      E2B_DB_HOST: ""
+      E2B_DB_PORT: "5433"
+      E2B_DB_NAME: postgres
+      E2B_TIER_ID: base_v1
+      E2B_TIER_CONCURRENT_INSTANCES: "100"
+      E2B_TIER_MAX_LENGTH_HOURS: "24"
+      E2B_TIER_DISK_MB: "2048"
+      OTEL_SDK_DISABLED: "false"
+      OTEL_EXPORTER_OTLP_ENDPOINT: "http://{{ $.Release.Name }}-otel-collector:4318"
+    nodeSelector: {}
+    affinity: {}
+    resources:
+      requests:
+        memory: 263Mi
+      limits:
+        memory: 1Gi
+    autoscaling:
+      enabled: false
+      minReplicas: 1
+      maxReplicas: 5
+      targetCPUUtilizationPercentage: 70
+      targetMemoryUtilizationPercentage: 75
+      scaleDownStabilizationSeconds: 300
+      scaleUpStabilizationSeconds: 30
+  budpipeline:
+    enabled: true
+    image: registry.bud.studio/runtime/budpipeline:1.1.0
+    daprid: budpipeline
+    pubsubTopic: budpipelineEvents
+    env:
+      LOG_LEVEL: INFO
+    nodeSelector: {}
+    affinity: {}
+    resources:
+      requests:
+        memory: 141Mi
+      limits:
+        memory: 1Gi
+  budevent:
+    enabled: true
+    image: registry.bud.studio/runtime/budevent:1.1.0
+    daprid: budevent
+    psqlHost: "pooler-rw-txn.postgres"
+    env:
+      RUST_LOG: info
+      OTEL_SDK_DISABLED: "false"
+      OTEL_EXPORTER_OTLP_ENDPOINT: "http://{{ $.Release.Name }}-otel-collector:4318"
+      MALLOC_ARENA_MAX: "2"
+      # Distributed-trace content capture (see budprompt.env above for the full note).
+      # DEBUG-FIRST: webhook/message body content recorded by default; set "false" to stop.
+      # Secret-keyed values ALWAYS redacted; bodies ALWAYS size-bounded.
+      BUD_TRACE_CAPTURE_CONTENT: "true"
+      BUD_TRACE_BODY_MAX_BYTES: "262144"
+    nodeSelector: {}
+    affinity: {}
+    maxConcurrentTurns: 512
+    resources:
+      requests:
+        cpu: 500m
+        memory: 512Mi
+      limits:
+        cpu: "2"
+        memory: 1Gi
+    autoscaling:
+      enabled: true
+      minReplicas: 2
+      maxReplicas: 10
+      targetCPUUtilizationPercentage: 70
+      targetMemoryUtilizationPercentage: 80
+      targetTurnsInFlight: 300
+      scaleDownStabilizationSeconds: 300
+      scaleUpStabilizationSeconds: 0
+  global:
+    env:
+      OPENAI_API_KEY: <change_me>
+      PASSWORD_SALT: pL4eVOkzsLEKc25T69UCvjXvK0BxgghwzSpEE9wBbUMNezEODv0s7tWcrhEeQyCh
+      SUPER_USER_EMAIL: root@example.com
+      SUPER_USER_PASSWORD: root@example.com
+      PROMETHEUS_URL: https://metric.bud.studio
+      BUD_LLM_BASE_URL: http://52.241.253.58/v1/
+      EVAL_MANIFEST_URL: https://eval-datasets.bud.eco/v2/manifest.json
+      S3_LOCAL_STACK: http://localhost:4566
+      DAPR_BASE_URL: http://localhost:3500
+      DAPR_HOST_IP: 127.0.0.1
+      WIDGET_EMBED_PATH: http://{{ .Release.Name }}-embed:4701/embed.umd.min.js
+      MONGO_URL: mongodb://{{ $.Values.externalServices.mongodb.auth.username }}:{{ $.Values.externalServices.mongodb.auth.password }}@{{ $.Values.externalServices.mongodb.endpoint }}/{{ $.Values.externalServices.mongodb.databases.novu }}
+      REACT_APP_WS_URL: http://{{ .Release.Name }}-ws:3000
+      FRONT_BASE_URL: http://{{ .Release.Name }}-web:4200
+      HOST_NAME: http://{{ .Release.Name }}-web:4200
+      WIDGET_URL: http://{{ .Release.Name }}-web:4200
+      API_BASE_URL: http://{{ .Release.Name }}-api:3000
+      API_ROOT_URL: http://{{ .Release.Name }}-api:3000
+      NOVU_API_BASE_URL: http://{{ .Release.Name }}-api:3000
+      ADD_MODEL_DIR: /datadisk/add_model_dir
+      API_CONTEXT_PATH: ""
+      APP_CONFIG: "{}"
+      APP_NAME: budapp
+      APP_PORT_BUDAPP: "9082"
+      APP_PORT_BUDPROXY: "3000"
+      AWS_ACCESS_KEY_ID: test
+      AWS_SECRET_ACCESS_KEY: test
+      BUD_CONNECT_URL: https://budconnect.bud.studio
+      BUD_LLM_MODEL: bud-gpt-oss-20b-ada28b58
+      CI: "true"
+      CONFIGSTORE_NAME: "{{ .Release.Name }}-configstore"
+      DISABLE_USER_REGISTRATION: "false"
+      DOCKER_REDIS_SERVICE_PORT: "{{ $.Values.externalServices.valkey.port }}"
+      ENGINE_CONTAINER_PORT: "8000"
+      EVAL_SYNC_ENABLED: "true"
+      EVAL_SYNC_LOCAL_MODE: "true"
+      EVAL_SYNC_USE_BUNDLES: "false"
+      GENERATION_COUNT: "10"
+      GLOBAL_CONTEXT_PATH: ""
+      IS_MULTI_TENANCY_ENABLED: "true"
+      IS_TOPIC_NOTIFICATION_ENABLED: "true"
+      LOG_LEVEL: INFO
+      MODEL_DOWNLOAD_DIR: /data/models-registry
+      MONGO_MAX_POOL_SIZE: "200"
+      MONGO_MIN_POOL_SIZE: "100"
+      NEW_RELIC_APP_NAME: budnotify
+      NEW_RELIC_NO_CONFIG_FILE: "true"
+      NODE_ENV: production
+      NODE_INFO_COLLECTOR_IMAGE_CPU: budstudio/node-info-collector-cpu:0.1.0
+      NODE_INFO_COLLECTOR_IMAGE_CUDA: budimages.azurecr.io/budecosystem/node-info-collector-cuda:latest
+      NODE_INFO_COLLECTOR_IMAGE_HPU: budimages.azurecr.io/budecosystem/node-info-collector-hpu:latest
+      NODE_INFO_LABELER_IMAGE: budimages.azurecr.io/budecosystem/node-device-labeler:latest
+      NODE_VERSION: 20.11.1
+      NOTIFY_SERVICE_NAME: "{{ $.Values.microservices.budnotify.daprid }}"
+      NOTIFY_SERVICE_TOPIC: "{{ $.Release.Namespace }}-{{ $.Release.Name }}-{{ $.Values.microservices.budnotify.pubsubTopic }}"
+      NX_DAEMON: "false"
+      POPULATION_SIZE: "50"
+      PORT: "3000"
+      REGISTRY_SERVER: https://budimages.azurecr.io
+      SECRETSTORE_NAME: "{{ .Release.Name}}-secretstore"
+      SECRETSTORE_SECRET_NAME: "{{ .Release.Name }}-secretstore"
+      SENTRY_DSN: ""
+      TENSORZERO_REDIS_URL: "redis://default:{{ $.Values.externalServices.valkey.password }}@{{ $.Values.externalServices.valkey.host }}:{{ $.Values.externalServices.valkey.port }}/{{ $.Values.externalServices.valkey.databases.budgateway }}"
+      VALIDATE_CERTS: "false"
+      VLLM_CPU_IMAGE: budimages.azurecr.io/budecosystem/bud-runtime-cpu:0.11
+      VLLM_CUDA_IMAGE: budimages.azurecr.io/budecosystem/bud-runtime-cuda:0.02
+      VLLM_HPU_IMAGE: budimages.azurecr.io/budecosystem/bud-runtime-hpu:latest
+      WEB_CONTEXT_PATH: ""
+      WS_CONTEXT_PATH: ""
+      WS_PORT: "3000"
+      YARN_VERSION: 1.22.19
+      RSA_KEY_NAME: rsa-private-key.pem
+      S3_BUCKET_NAME: "{{ $.Values.externalServices.s3.buckets.novu }}"
+      S3_REGION: "us-east-1"
+      MINIO_BUCKET: "{{ $.Values.externalServices.s3.buckets.modelRegistry }}"
+      MINIO_ENDPOINT: "{{ $.Values.externalServices.s3.endpoint }}"
+      MINIO_MODEL_BUCKET: "{{ $.Values.externalServices.s3.buckets.modelInfo }}"
+      MINIO_ACCESS_KEY: "{{ $.Values.externalServices.s3.auth.accessKey }}"
+      MINIO_SECRET_KEY: "{{ $.Values.externalServices.s3.auth.secretKey }}"
+      MINIO_SECURE: "{{ $.Values.externalServices.s3.secure | default false }}"
+      REDIS_CACHE_SERVICE_HOST: ""
+      REDIS_CACHE_SERVICE_PORT: "{{ $.Values.externalServices.valkey.port }}"
+      REDIS_DB_INDEX: "{{ $.Values.externalServices.valkey.databases.global }}"
+      REDIS_HOST: "{{ $.Values.externalServices.valkey.host }}"
+      REDIS_PASSWORD: "{{ $.Values.externalServices.valkey.password }}"
+      REDIS_PASSWORD_BUDAPP: "{{ $.Values.externalServices.valkey.password }}"
+      REDIS_PORT: "{{ $.Values.externalServices.valkey.port }}"
+      REDIS_URI: "{{ $.Values.externalServices.valkey.host }}:{{ $.Values.externalServices.valkey.port }}"
+# Admin credentials for the Operator-managed Keycloak (deployed via
+# infra/helm/keycloak/). Must match the values supplied to that chart.
+# Custom theme + per-env logo overlay are configured there too.
+# OpenTelemetry Collector for metrics collection
+# Dapr distributed tracing (spec 004-observability-otel-refactor, Task 3).
+# OFF by default: Dapr sidecars currently log traces to stdout only, so
+# service-invocation / pub-sub hops do NOT join the OTel trace graph. Setting
+# enabled=true renders templates/dapr/tracing-configuration.yaml which points
+# the Dapr OTLP exporter at the in-cluster collector. To actually opt a
+# service in you must ALSO add `dapr.io/config: <release>-tracing` to that
+# service's pod annotations (deferred rollout — see the template header).
+# W3C tracecontext + bud.* baggage propagation is independent of this flag.
+daprTracing:
+  enabled: false
+  samplingRate: "1"
+otelCollector:
+  enabled: true
+  image:
+    repository: otel/opentelemetry-collector-contrib
+    tag: 0.151.0
+  replicas: 1
+  logLevel: info
+  debug: false
+  batchSize: 10000
+  batchTimeout: 10s
+  memoryLimit: 2048
+  memorySpikeLimit: 512
+  resources:
+    requests:
+      memory: 262Mi
+    limits:
+      memory: 1Gi
+  clickhouse:
+    host: clickhouse
+    port: 9000
+    database: metrics
+    username: default
+    password: ""
+    ttl: 720h
+  groupByTrace:
+    waitDuration: 5s
+    numTraces: 1000000
+    numWorkers: 2
+  realtime:
+    batchTimeout: 2s
+    batchSize: 10000
+  # EXTERNAL trace export (Phase 1 — spec 004-observability-otel-refactor).
+  # Ships a SECOND copy of spans to the external LGTM/Tempo OTLP sink so
+  # cross-service traces are viewable in Tempo/Jaeger. On this pipeline ONLY,
+  # message-content (gen_ai.input/output.messages, system.instructions) and
+  # request/response header attributes are DELETED before egress. The
+  # ClickHouse cold path is untouched and keeps full content for Phase-2.
+  #
+  # endpoint: gRPC OTLP address of the Tempo distributor. The LGTM stack is
+  # NOT part of this chart — set this to wherever Tempo is reachable in the
+  # target cluster (e.g. tempo / tempo-distributor in the observability ns).
+  # Disabled by default so installs without an external sink keep rendering a
+  # valid collector config (only the ClickHouse + realtime pipelines run).
+  externalExport:
+    enabled: false
+    endpoint: "tempo.observability.svc.cluster.local:4317"
+    tls:
+      insecure: true
+    # Optional static headers for the OTLP exporter (e.g. tenant id / auth).
+    headers: {}
+  # Optional node scheduling for OTel Collector
+  nodeSelector: {}
+  affinity: {}
+prometheus:
+  enabled: true
+  alertmanager:
+    enabled: false
+  kube-state-metrics:
+    enabled: false
+  prometheus-node-exporter:
+    enabled: false
+  prometheus-pushgateway:
+    enabled: false
+  server:
+    persistentVolume:
+      storageClass: ""
+    retention: "2h"
+    resources:
+      requests:
+        memory: 881Mi
+      limits:
+        memory: 16Gi
+    nodeSelector: {}
+    affinity: {}
+  # Drop the subchart's default cluster-wide scrape jobs (apiserver/etcd histograms + NFD node-label explosion) that bloat this HPA-only Prometheus to 10GB+; keep only self + kubernetes-pods (app jobs append via extraScrapeConfigs). Replaces scrape_configs only; Helm merges the map so rule_files survive.
+  serverFiles:
+    prometheus.yml:
+      scrape_configs:
+        - job_name: prometheus
+          static_configs:
+            - targets:
+                - localhost:9090
+        - honor_labels: true
+          job_name: kubernetes-pods
+          kubernetes_sd_configs:
+            - role: pod
+          relabel_configs:
+            - action: keep
+              regex: true
+              source_labels:
+                - __meta_kubernetes_pod_annotation_prometheus_io_scrape
+            - action: drop
+              regex: true
+              source_labels:
+                - __meta_kubernetes_pod_annotation_prometheus_io_scrape_slow
+            - action: replace
+              regex: (https?)
+              source_labels:
+                - __meta_kubernetes_pod_annotation_prometheus_io_scheme
+              target_label: __scheme__
+            - action: replace
+              regex: (.+)
+              source_labels:
+                - __meta_kubernetes_pod_annotation_prometheus_io_path
+              target_label: __metrics_path__
+            - action: replace
+              regex: (\d+);(([A-Fa-f0-9]{1,4}::?){1,7}[A-Fa-f0-9]{1,4})
+              replacement: "[$2]:$1"
+              source_labels:
+                - __meta_kubernetes_pod_annotation_prometheus_io_port
+                - __meta_kubernetes_pod_ip
+              target_label: __address__
+            - action: replace
+              regex: (\d+);((([0-9]+?)(\.|$)){4})
+              replacement: $2:$1
+              source_labels:
+                - __meta_kubernetes_pod_annotation_prometheus_io_port
+                - __meta_kubernetes_pod_ip
+              target_label: __address__
+            - action: labelmap
+              regex: __meta_kubernetes_pod_annotation_prometheus_io_param_(.+)
+              replacement: __param_$1
+            - action: labelmap
+              regex: __meta_kubernetes_pod_label_(.+)
+            - action: replace
+              source_labels:
+                - __meta_kubernetes_namespace
+              target_label: namespace
+            - action: replace
+              source_labels:
+                - __meta_kubernetes_pod_name
+              target_label: pod
+            - action: drop
+              regex: Pending|Succeeded|Failed|Completed
+              source_labels:
+                - __meta_kubernetes_pod_phase
+            - action: replace
+              source_labels:
+                - __meta_kubernetes_pod_node_name
+              target_label: node
+  extraScrapeConfigs: |
+    - job_name: 'budgateway'
+      scrape_interval: 1s
+      kubernetes_sd_configs:
+        - role: pod
+      relabel_configs:
+        - source_labels: [__meta_kubernetes_pod_label_app]
+          regex: .*-budgateway
+          action: keep
+        - source_labels: [__meta_kubernetes_pod_container_port_number]
+          regex: "3000"
+          action: keep
+        - source_labels: [__meta_kubernetes_namespace]
+          target_label: namespace
+        - source_labels: [__meta_kubernetes_pod_name]
+          target_label: pod
+    - job_name: 'semantic-router'
+      scrape_interval: 15s
+      kubernetes_sd_configs:
+        - role: pod
+      relabel_configs:
+        - source_labels: [__meta_kubernetes_pod_label_app]
+          regex: .*-semantic-router
+          action: keep
+        - source_labels: [__meta_kubernetes_pod_container_port_number]
+          regex: "9190"
+          action: keep
+        - source_labels: [__meta_kubernetes_namespace]
+          target_label: namespace
+        - source_labels: [__meta_kubernetes_pod_name]
+          target_label: pod
+    - job_name: 'budprompt'
+      scrape_interval: 5s
+      kubernetes_sd_configs:
+        - role: pod
+      relabel_configs:
+        - source_labels: [__meta_kubernetes_pod_label_app]
+          regex: .*-budprompt
+          action: keep
+        - source_labels: [__meta_kubernetes_pod_container_port_number]
+          regex: "3015"
+          action: keep
+        - source_labels: [__meta_kubernetes_namespace]
+          target_label: namespace
+        - source_labels: [__meta_kubernetes_pod_name]
+          target_label: pod
+prometheus-adapter:
+  enabled: true
+  prometheus:
+    url: "http://{{ $.Release.Name }}-prometheus-server"
+    port: 80
+  rules:
+    custom:
+      - seriesQuery: 'gateway_processing_seconds{quantile="0.95"}'
+        resources:
+          overrides:
+            pod: { resource: "pod" }
+            namespace: { resource: "namespace" }
+        name:
+          as: "gateway_processing_seconds_p95"
+        metricsQuery: 'gateway_processing_seconds{quantile="0.95",<<.LabelMatchers>>}'
+      - seriesQuery: "llm_model_queue_depth_estimated"
+        resources:
+          overrides:
+            pod: { resource: "pod" }
+            namespace: { resource: "namespace" }
+        name:
+          as: "sr_in_flight_requests"
+        metricsQuery: "sum without (model) (llm_model_queue_depth_estimated{<<.LabelMatchers>>})"
+      - seriesQuery: "budprompt_inflight_requests"
+        resources:
+          overrides:
+            pod: { resource: "pod" }
+            namespace: { resource: "namespace" }
+        name:
+          as: "budprompt_inflight_requests"
+        metricsQuery: "sum(budprompt_inflight_requests{<<.LabelMatchers>>}) by (<<.GroupBy>>)"
+onyx:
+  enabled: false
+  keycloak:
+    auth:
+      adminUser: "admin"
+      adminPassword: "keycloak"
+  postgresql:
+    enabled: false
+  valkey:
+    enabled: false
+  minio:
+    enabled: false
+  vespa:
+    enabled: true
+    name: da-vespa-0
+    service:
+      name: vespa-service
+    replicaCount: 1
+    resources:
+      requests:
+        memory: 8000Mi
+      limits:
+        memory: 32000Mi
+  nginx:
+    enabled: false
+  ingress:
+    enabled: false
+  letsencrypt:
+    enabled: false
+  global:
+    pullPolicy: "Always"
+  auth:
+    postgresql:
+      enabled: true
+      existingSecret: "{{ $.Release.Name }}-onyx-postgresql"
+      secretKeys:
+        POSTGRES_USER: username
+        POSTGRES_PASSWORD: password
+    redis:
+      enabled: true
+      existingSecret: "{{ $.Release.Name }}-onyx-redis"
+      secretKeys:
+        REDIS_PASSWORD: redis_password
+    objectstorage:
+      enabled: true
+      existingSecret: "{{ $.Release.Name }}-onyx-objectstorage"
+      secretKeys:
+        S3_AWS_ACCESS_KEY_ID: s3_aws_access_key_id
+        S3_AWS_SECRET_ACCESS_KEY: s3_aws_secret_access_key
+    oauth:
+      enabled: true
+      existingSecret: "{{ $.Release.Name }}-onyx-oauth"
+      secretKeys:
+        KEYCLOAK_ADMIN_PASSWORD: keycloak_admin_password
+        OAUTH_COOKIE_SECRET: oauth_cookie_secret
+        OAUTH_CLIENT_ID: ""
+        OAUTH_CLIENT_SECRET: ""
+    smtp:
+      enabled: false
+  configMap:
+    AUTH_TYPE: "oidc"
+    POSTGRES_DB: "onyx"
+    REDIS_DB: "11"
+    KEYCLOAK_ADMIN_USERNAME: "admin"
+    KEYCLOAK_REALM: "bud-keycloak"
+    WEB_DOMAIN: '{{ printf "https://chat.%s" .Values.global.ingress.hosts.root }}'
+    DOMAIN: "{{ .Values.global.ingress.hosts.root }}"
+    S3_FILE_STORE_BUCKET_NAME: "onyx-file-store-bucket"
+    BUD_FOUNDRY_API_BASE: '{{ printf "https://gateway.%s" .Values.global.ingress.hosts.root }}/v1'
+    BUD_FOUNDRY_APP_BASE: '{{ printf "https://app.%s" .Values.global.ingress.hosts.root }}'
+    OPENID_CONFIG_URL: "{{ $.Values.externalServices.oidc.url }}/.well-known/openid-configuration"
+  webserver:
+    replicaCount: 1
+    resources:
+      requests:
+        memory: 512Mi
+      limits:
+        memory: 1Gi
+  api:
+    replicaCount: 1
+    resources:
+      requests:
+        memory: 1Gi
+      limits:
+        memory: 2Gi
+  celery_beat:
+    replicaCount: 1
+  celery_worker_primary:
+    replicaCount: 1
+  celery_worker_light:
+    replicaCount: 1
+  celery_worker_heavy:
+    replicaCount: 1
+  slackbot:
+    enabled: false
+  inferenceCapability:
+    replicaCount: 1
+  indexCapability:
+    replicaCount: 1
+daprExtra:
+  crypto:
+    symmetricKey: I6e!yKxURFzBcV4!3nJmlINrqFbGx1S6
+    budeventCryptoKey: ""
+    asymmetricKey: |
+      -----BEGIN PRIVATE KEY-----
+      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
+      98aw0yFJFDe4dXlpv5zgLyZJDBMGZA==
+      -----END PRIVATE KEY-----
+keycloak:
+  auth:
+    adminUser: admin
+    adminPassword: keycloak

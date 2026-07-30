@@ -1,0 +1,869 @@
+{{- /*
+  Phase 1 (FRD W3.2): Bundled Deployment + Service for the semantic-router stub.
+  Mirrors the standalone chart at services/semantic-router/deploy/helm/semantic-router/
+  but trimmed to the surface budgateway needs:
+    - HTTP API on :8080 — /v1/route/{request,response} stub handlers (W3.1)
+    - Prometheus on :9190
+    - ext_proc on :50051 (retained per PRD §5.1; consumed by Phase 2)
+  Decision 1 — no Envoy sidecar; budgateway calls SR directly over HTTP.
+*/ -}}
+{{- /*
+  Boot config — kept in sync with services/semantic-router/deploy/budstack/config.yaml
+  (the local-dev / start.sh source). `${SR_REDIS_*}` placeholders inside the
+  YAML are expanded at runtime by SR's loader against the env vars set on
+  the pod below.
+*/ -}}
+{{- if .Values.microservices.semanticRouter.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Release.Name }}-semantic-router-config
+data:
+  config.yaml: |
+    # =====================================================================
+    # Production semantic-router boot config — `bud-runtime` stack
+    # =====================================================================
+    # This YAML is the *boot shell* SR loads at startup. It declares:
+    #
+    #   - `model_catalog` paths SR `dlopen`s for embeddings + classifiers
+    #     (the four models baked by `deploy/budstack/Dockerfile`)
+    #   - the semantic-cache backend (Valkey, matching the helm chart's
+    #     `externalServices.valkey` block)
+    #   - observability sinks (OTLP + Prometheus)
+    #   - the `config_source: redis` switch so per-router DAG payloads come
+    #     from budapp via `router_config:<router_id>` keys (FRD §W1.1/W1.4)
+    #   - the looper endpoint pointing back at budgateway so orchestrating
+    #     algorithms (confidence / ratings / remom) re-enter through the
+    #     gateway with the caller's bearer token (FRD §W2.5a)
+    #
+    # It does NOT enumerate `signals`, `projections`, `decisions`,
+    # `providers.models`, or per-router classifier rules — those are the
+    # DAG payloads budapp publishes via Redis. A YAML-only deploy works
+    # (set `config_source: file` and add the DAG inline) but the canonical
+    # bud-runtime path is Redis-driven.
+    #
+    # Manifest alignment (`services/budapp/budapp/router_ops/manifest.yaml`):
+    #   enabled signals: keyword, embedding, domain, user_feedback, reask,
+    #                    preference, language, context, structure, complexity,
+    #                    kb (privacy_kb + mmlu_kb), conversation
+    #   skipped (per ops decision): jailbreak, pii, fact_check, hallucination
+    #   enabled algorithms: confidence, ratings, remom, static, router_dc,
+    #                       automix, hybrid, latency_aware
+    #   enabled plugins: semantic_cache, system_prompt, request_params,
+    #                    fast_response
+    # =====================================================================
+
+    version: v0.3
+
+    # Internal HTTP listener — used by the looper for outbound calls when
+    # orchestrating algorithms run inline. Production traffic enters via
+    # the apiserver on `--api-port=8080` (set by start.sh / helm), not here.
+    listeners:
+      - name: http-internal
+        address: 127.0.0.1
+        port: 8899
+        timeout: 300s
+
+    # =====================================================================
+    # Providers — per-tenant model lists are pushed by budapp via Redis.
+    # This block stays minimal: just the reasoning-family registry SR uses
+    # to translate `reasoning_effort` into the right backend parameter
+    # (`enable_thinking` for qwen3-style models, `reasoning.effort` for GPT).
+    # Extend `reasoning_families` here only when adding a vendor whose
+    # parameter shape isn't already covered.
+    # =====================================================================
+    providers:
+      defaults:
+        default_reasoning_effort: medium
+        reasoning_families:
+          qwen3:
+            type: chat_template_kwargs
+            parameter: enable_thinking
+          deepseek:
+            type: chat_template_kwargs
+            parameter: thinking
+          gpt:
+            type: reasoning_effort
+            parameter: reasoning.effort
+          claude:
+            type: reasoning_effort
+            parameter: reasoning.effort
+      # Per-tenant `models` are populated from budapp DAG pushes. Keep
+      # empty here so this YAML is tenant-agnostic.
+      models: []
+
+    # =====================================================================
+    # Routing — empty in Redis-driven mode. Budapp publishes per-router
+    # `signals` / `projections` / `decisions` blobs to
+    # `router_config:<router_id>`; SR's registry compiles them into the
+    # per-router classifier shell on hot-update.
+    # =====================================================================
+    routing:
+      modelCards: []
+      signals: {}        # CanonicalSignals — populated per-router from Redis DAG
+      projections: {}    # CanonicalProjections — same
+      session_states: []
+      decisions: []
+
+    # =====================================================================
+    # Global infrastructure
+    # =====================================================================
+    global:
+      router:
+        # FRD §W1.1 / §W1.4: load per-router DAGs from Redis. The helm chart
+        # also sets ROUTER_CONFIG_SOURCE=redis as an env-var override
+        # (`applyConfigSourceEnvOverrides`); both paths converge on the
+        # same loader.
+        # The canonical YAML schema (`pkg/config/canonical_global.go:
+        # CanonicalRouterGlobal`) doesn't have a `redis_config_source`
+        # field — that lives only on the legacy top-level `RouterConfig`.
+        # For the redis-backed config source, the env-var path is the
+        # only correct way to set the connection: `cmd/runtime_bootstrap.go:
+        # applyConfigSourceEnvOverrides` reads `ROUTER_REDIS_CONFIG_*` and
+        # populates `cfg.RedisConfigSource` post-canonical-merge. The
+        # helm chart and `.env` both wire those vars; we just declare
+        # `config_source: redis` here so the loader knows to consult them.
+        config_source: redis
+
+        # Highest-priority decision wins ties. Other strategies (random,
+        # weighted) are reserved for A/B-testing routers; production uses
+        # priority for deterministic routing.
+        strategy: priority
+        auto_model_name: bud-routed
+        include_config_models_in_list: true
+        clear_route_cache: false
+
+        # Force-load classifiers at startup. In Redis-driven multi-tenant
+        # mode per-router rules arrive after boot and aren't visible to
+        # the singleton-rule lifecycle gate, so the underlying models
+        # would otherwise stay unloaded and per-router rules referencing
+        # them would fail at request time with signal_not_ready
+        # (router_ops/README.md case #2). Operators that intend to serve
+        # user_feedback / domain signals via per-router DAGs opt-in here.
+        classifier_preload:
+          - feedback
+          - domain
+
+        # Buffer streamed bodies so SR can inspect them before forwarding.
+        # 16 MiB ceiling accommodates large RAG / multimodal payloads; the
+        # gateway-side body limit must be at least this high or it will
+        # reject forwarded requests. Timeout sized for slow upstreams that
+        # take time to emit the first byte.
+        streamed_body:
+          enabled: true
+          max_bytes: 16777216
+          timeout_sec: 300
+
+        # Selection-algorithm defaults. AutoMix and Hybrid no longer live
+        # here — their tuning knobs are surfaced per Decision in the budapp
+        # manifest (`router_ops/manifest.yaml`) and stamped onto the
+        # algorithm step's params by `pipeline_actions._fill_default_params`,
+        # so SR's per-router selector registry sees concrete values on every
+        # Redis upsert (router_selection.go:findDecisionScopedSelectionConfigs).
+        # RouterDC stays here because its boot-time embedding/dimension/contrast
+        # settings are deployment-wide and rarely need per-decision overrides.
+        model_selection:
+          method: hybrid
+          enabled: true
+          router_dc:
+            temperature: 0.2
+            dimension_size: 768
+            min_similarity: 0.7
+            use_query_contrastive: true
+            use_model_contrastive: true
+            require_descriptions: true
+            use_capabilities: true
+
+      # =====================================================================
+      # Service-level config (observability, auth, rate-limit, startup)
+      # =====================================================================
+      services:
+        api:
+          batch_classification:
+            max_batch_size: 100
+            concurrency_threshold: 5
+            max_concurrency: 8
+            metrics:
+              sample_rate: 1.0
+              batch_size_ranges:
+                - {min: 1, max: 4, label: tiny}
+                - {min: 5, max: 16, label: standard}
+                - {min: 17, max: 64, label: large}
+              duration_buckets: [0.01, 0.05, 0.1, 0.5, 1.0, 5.0]
+              size_buckets: [128, 512, 2048, 8192, 32768]
+              enabled: true
+              detailed_goroutine_tracking: false
+              high_resolution_timing: false
+
+        response_api:
+          enabled: true
+          store_backend: redis
+          ttl_seconds: 86400
+          max_responses: 5000
+          redis:
+            address: "${SR_REDIS_HOST}:${SR_REDIS_PORT}"
+            password: "${SR_REDIS_PASSWORD}"
+            db: ${SR_REDIS_DB}
+            key_prefix: "vsr:responses:"
+            cluster_mode: false
+            pool_size: 16
+            min_idle_conns: 4
+            max_retries: 3
+            dial_timeout: 5
+            read_timeout: 5
+            write_timeout: 5
+            tls_enabled: false
+
+        observability:
+          tracing:
+            enabled: true
+            provider: opentelemetry
+            exporter:
+              # OTLP/gRPC to the in-cluster OTel Collector (same sink that
+              # budgateway and the Python services export to, see
+              # templates/extra/otel-collector.yaml). Traces flow into the
+              # collector's traces pipeline and on to ClickHouse.
+              type: otlp
+              endpoint: "{{ .Release.Name }}-otel-collector:4317"
+              insecure: true
+            sampling:
+              # Tail-sample at 10%; bump to 1.0 during incident triage.
+              type: traceidratio
+              rate: 0.1
+            resource:
+              service_name: semantic-router
+              service_version: "0.10.0"
+              deployment_environment: production
+          metrics:
+            enabled: true
+            windowed_metrics:
+              enabled: true
+              time_windows: [1m, 5m, 1h]
+              update_interval: 30s
+              model_metrics: true
+              queue_depth_estimation: true
+              max_models: 200
+
+        # authz: omitted on purpose.
+        #
+        # Caller authentication flows via budgateway → SR's
+        # `/v1/route/request` `caller_auth` field (FRD §W2.5a), not through
+        # SR's authz plugin chain. The matching `signal_authz` is also
+        # disabled in budapp's manifest. With no `authz.providers` set,
+        # SR's `buildCredentialResolver` falls back to
+        # `buildDefaultCredentialResolver(fail_open=true)` — the right
+        # behavior for the routergw transport since gateway is the only
+        # ingress hop and has already verified the caller before forwarding.
+
+        # ratelimit: omitted on purpose.
+        #
+        # budgateway runs Envoy with its own rate-limit filter in front
+        # of SR — adding a second layer here would be redundant.
+        # SR's `buildRateLimitResolver` returns nil when `providers` is
+        # empty (logs `rate_limit_resolver_disabled` and skips checks).
+        # Valid SR provider types are `envoy-ratelimit` (delegates to a
+        # local Envoy RLS) and `local-limiter` (in-process token bucket);
+        # `redis` is not one of them. Re-enable here only if the gateway-
+        # side rate-limit ever needs supplementing with per-router caps
+        # SR can apply post-DAG-evaluation.
+
+        startup_status:
+          # File-backed (per-pod /tmp). The redis backend is wired as a
+          # writer-only path — apiserver `/ready` always reads the local
+          # file (`pkg/apiserver/server.go:handleReady`), and no other
+          # service in the platform consumes `vllm-sr:startup-status`.
+          # Selecting redis here therefore makes the startup probe 503
+          # forever because the file the reader expects is never written.
+          # The "dashboard surfaces readiness across replicas" use case
+          # the previous comment promised was never wired up.
+          store_backend: file
+
+        router_replay:
+          # Replay capture is debug instrumentation; off in production.
+          enabled: false
+
+      # =====================================================================
+      # Stores: semantic cache + memory + vector store backends
+      # =====================================================================
+      stores:
+        # Semantic cache — in-memory HNSW backend.
+        #
+        # The redis backend (commented below) requires RediSearch / Valkey-
+        # Search on the target so SR can issue `FT.CREATE`; deployments that
+        # ship plain Bitnami Valkey would fail at startup. Memory backend
+        # works everywhere with no external deps. Trade-off: per-replica
+        # cache state — a hit on replica A is invisible to replica B. For
+        # replicas=2 (helm default) effective hit rate halves vs. a shared
+        # backend; acceptable since the orchestrating-path is the cost-
+        # sensitive case and cache hits there are rare anyway.
+        #
+        # To switch to a shared cache: load RediSearch / valkey-search on
+        # the target, flip `backend_type` to `redis`, and uncomment the
+        # `redis:` block below.
+        semantic_cache:
+          backend_type: memory
+          enabled: true
+          similarity_threshold: 0.92
+          max_entries: 100000
+          ttl_seconds: 86400
+          eviction_policy: lru
+          embedding_model: qwen3
+          # NOTE: HNSW indexing for the in-memory backend is on by default
+          # inside SR's cache implementation. The canonical
+          # `SemanticCache` YAML struct (`pkg/config/runtime_config.go`)
+          # does not expose `use_hnsw` / `hnsw_m` / `hnsw_ef_construction`
+          # — those fields live on the internal `cache.CacheConfig` and
+          # cannot be tuned from this YAML. Setting them here triggers
+          # SR's "Unknown field" warnings.
+          # redis:
+          #   connection:
+          #     host: "${SR_REDIS_HOST}"
+          #     port: ${SR_REDIS_PORT}
+          #     database: ${SR_REDIS_DB}
+          #     password: "${SR_REDIS_PASSWORD}"
+          #     timeout: 5
+          #     tls:
+          #       enabled: false
+          #   index:
+          #     name: semantic_cache_idx
+          #     prefix: "vsr:cache:"
+          #     vector_field:
+          #       name: embedding
+          #       dimension: 1024  # MUST match `embedding_model` output
+          #                        # qwen3=1024, mmbert=768, bert=384
+          #       metric_type: COSINE
+          #     index_type: HNSW
+          #     params:
+          #       M: 16
+          #       efConstruction: 200
+          #   search:
+          #     topk: 10
+          #   development:
+          #     drop_index_on_startup: false
+          #     auto_create_index: true
+          #     verbose_errors: false
+          #   logging:
+          #     level: info
+          #     enable_query_log: false
+          #     enable_metrics: true
+
+        # Plugin_memory is disabled in the manifest; keep the block minimal
+        # so canonical defaults validate. Re-enable by setting `enabled: true`
+        # and pointing at a Milvus / Redis backend if memory plugin is added.
+        memory:
+          enabled: false
+          backend: redis_cache
+          auto_store: false
+
+        # Vector-store ingestion (file-upload RAG) is off in this deploy —
+        # the manifest has `plugin_rag` disabled. Toggle on + configure
+        # the milvus block if turning RAG on.
+        vector_store:
+          enabled: false
+
+      # =====================================================================
+      # Integrations: looper (orchestrating algorithms call back through gw)
+      # =====================================================================
+      integrations:
+        tools:
+          enabled: false  # plugin_tools disabled in manifest
+        looper:
+          # Orchestrating algorithms (confidence/ratings/remom) make
+          # outbound LLM calls. SR re-enters through budgateway with the
+          # caller's bearer token + `X-Bud-Internal-Source: semantic-router`
+          # header so gateway's recursion guard skips the router-dispatch
+          # branch (FRD §W2.5c). Helm aligns to the bud-runtime budgateway
+          # service name; for non-helm deploys edit this YAML directly.
+          endpoint: "http://budgateway:3001/v1/chat/completions"
+          grpc_max_msg_size_mb: 32
+          timeout_seconds: 300
+          retry_count: 2
+          headers:
+            X-Bud-Internal-Source: semantic-router
+
+      # =====================================================================
+      # Model catalog — paths to baked models (`deploy/budstack/Dockerfile`
+      # bakes these into `/app/models/`; `start.sh` for local launches
+      # resolves them relative to the service root).
+      #
+      # Skipped per ops decision: prompt_guard, pii_classifier,
+      # fact_check_classifier, hallucination_detector,
+      # hallucination_explainer. The manifest's matching signals/plugins
+      # (`signal_jailbreak`, `signal_pii`, `signal_fact_check`,
+      # `plugin_hallucination`) are also disabled.
+      # =====================================================================
+      model_catalog:
+        embeddings:
+          semantic:
+            # Primary embedding for `signal_embedding`, `signal_complexity`,
+            # `signal_kb`, the semantic cache, and selection algorithms
+            # (RouterDC / GMT / Hybrid / ML). Qwen3 is the only embedding
+            # model the candle binding's continuous-batched path supports
+            # today, and `pkg/extproc/router_selection.go` calls
+            # `GetEmbeddingBatched(text, "qwen3", 1024)` unconditionally
+            # — running with mmbert/gemma here makes every selection
+            # algorithm fall back to first-candidate. ~1.9 GB image cost
+            # is the trade-off.
+            qwen3_model_path: models/mom-embedding-pro
+
+            # Explicitly clear the canonical default for `mmbert_model_path`
+            # (`canonical_defaults.go:183` injects `models/mmbert-embed-32k-2d-matryoshka`).
+            # The YAML merge in `resolveCanonicalGlobal` only overrides defaults
+            # for fields explicitly set in this YAML — leaving it absent makes
+            # `BuildModelSpecs` (reflective `*ModelPath` scan) flag the unbaked
+            # mmbert dir as missing and demand the HF CLI at runtime.
+            #
+            # Setting "" is safe: every active signal dispatches through
+            # `getEmbeddingWithModelType(text, c.modelType, ...)` with
+            # `c.modelType` resolved from `embedding_config.model_type` below
+            # (= `qwen3`), and the cache + selection algorithms (RouterDC etc.)
+            # also pin "qwen3" as the model type. Nothing in this config asks
+            # the binding for the mmbert slot, so leaving it uninitialized is
+            # a no-op. Re-baking is only needed if `model_type` flips to
+            # `mmbert`.
+            mmbert_model_path: ""
+
+            # Fallback bert path is intentionally absent. SR's semantic-cache
+            # code path resolves `bert_model_path` only when
+            # `embedding_model: bert`; we use qwen3 above, so this would be a
+            # safety net we never hit. Listing it pulls `models/all-MiniLM-L12-v2`
+            # into the required-models check (`BuildModelSpecs` greps every
+            # `*ModelPath` field that starts with `models/`), which forces the
+            # runtime to either bake the weights or ship the HF CLI to download
+            # at startup — neither makes sense for a path the cache never reads.
+            # To re-enable bert as the cache embedding: bake
+            # `sentence-transformers/all-MiniLM-L12-v2` under
+            # `/app/models/mom-embedding-light` (the LocalPath SR's registry
+            # maps the `bert` alias to — NOT `all-MiniLM-L12-v2`, or the
+            # downloader 401s on a malformed HF URL), set
+            # `embedding_model: bert` on the cache, and add
+            # `bert_model_path: models/mom-embedding-light` here.
+            # bert_model_path: models/mom-embedding-light
+
+            # Skipped — not needed alongside qwen3.
+            # gemma_model_path: ""
+            # multimodal_model_path: ""
+
+            use_cpu: true
+            embedding_config:
+              # Drives `model_type` selection in classifier_construction.go.
+              model_type: qwen3
+              preload_embeddings: true
+              target_dimension: 768
+              target_layer: 22
+              enable_soft_matching: true
+              top_k: 1
+              min_score_threshold: 0.45
+              prototype_scoring:
+                enabled: true
+                cluster_similarity_threshold: 0.9
+                max_prototypes: 8
+                best_weight: 0.75
+                top_m: 2
+                margin_threshold: 0.0
+
+        system:
+          # Domain classifier for `signal_domain`. Merged variant — no PEFT
+          # runtime needed. 14 MMLU-Pro classes match the manifest enum.
+          domain_classifier: models/mmbert32k-intent-classifier-merged
+
+          # Feedback detector for `signal_user_feedback`. Merged variant,
+          # 4 classes (satisfied / need_clarification / wrong_answer /
+          # want_different) — exact manifest enum match.
+          feedback_detector: models/mmbert32k-feedback-detector-merged
+
+          # Skipped — set to "" so SR's PrepareRouterRuntime treats them
+          # as not-configured rather than attempting a download.
+          prompt_guard: ""
+          pii_classifier: ""
+          fact_check_classifier: ""
+          hallucination_detector: ""
+          hallucination_explainer: ""
+
+        # Module wiring. SR's canonical loader auto-resolves `model_ref`
+        # entries against `system.*` above, so each module here pins an
+        # exact backing model. Modules whose backing classifier is skipped
+        # (jailbreak / PII / hallucination per ops decision) override the
+        # default `model_ref` to "" and disable the feature.
+        modules:
+          prompt_guard:
+            model_ref: ""
+            enabled: false
+
+          classifier:
+            domain:
+              # Backed by system.domain_classifier — drives `signal_domain`.
+              model_ref: domain_classifier
+              threshold: 0.5
+              use_cpu: true
+              use_mmbert_32k: true
+              category_mapping_path: models/mmbert32k-intent-classifier-merged/category_mapping.json
+            pii:
+              model_ref: ""
+            # Optional MCP-bridged classifier — disabled in this deploy.
+            mcp:
+              enabled: false
+            preference:
+              # Drives `signal_preference`; contrastive scoring on by default.
+              use_contrastive: true
+              # Pin the contrastive embedder to qwen3. Without this,
+              # `NewContrastivePreferenceClassifier` defaults the empty
+              # `embedding_model` to `mmbert`
+              # (`contrastive_preference_classifier.go:72`), which routes
+              # to an uninitialized binding slot once `mmbert_model_path`
+              # is cleared above and degrades the preference classifier to
+              # `router_preference_classifier_skipped`. This field is
+              # independent of the global `embedding_config.model_type`.
+              embedding_model: qwen3
+              # Qwen3 last-token-pooled cosines on short prompts cluster
+              # tightly enough that an unrelated query can land within the
+              # absolute threshold of the closest rule, while a genuine
+              # match is decisively closer to its rule (large
+              # best-vs-runner-up gap) and an off-distribution query lands
+              # ambiguously between rules (small gap). Gating on margin in
+              # addition to absolute threshold rejects the latter without
+              # dragging down recall on paraphrases. Enforced inside
+              # `ContrastivePreferenceClassifier.Classify`.
+              prototype_scoring:
+                margin_threshold: 0.10
+
+          hallucination_mitigation:
+            enabled: false
+            fact_check:
+              model_ref: ""
+            detector:
+              model_ref: ""
+            explainer:
+              model_ref: ""
+
+          feedback_detector:
+            model_ref: feedback_detector
+            enabled: true
+            threshold: 0.7
+            use_cpu: true
+            use_mmbert_32k: true
+
+        # External LLMs SR may call as guardrails (e.g. content moderation).
+        # Empty by default; populate per-deployment via helm values overlay
+        # if a guardrail model is wired in.
+        external: []
+
+        # Knowledge bases for `signal_kb` (privacy_kb + mmlu_kb in the
+        # manifest). Prototype scoring tunes the embedding-vs-label match.
+        # `groups` mirrors the manifest's `target_value` cascade.
+        kbs:
+          - name: privacy_kb
+            source:
+              path: knowledge_bases/privacy/
+              manifest: labels.json
+            threshold: 0.55
+            prototype_scoring:
+              enabled: true
+              cluster_similarity_threshold: 0.9
+              max_prototypes: 8
+              best_weight: 0.75
+              top_m: 2
+              margin_threshold: 0.0
+            # Per-label thresholds — labels with stricter precision needs
+            # (prompt-injection) get a higher cutoff.
+            label_thresholds:
+              prompt_injection: 0.7
+            groups:
+              security_containment:
+                - prompt_injection
+                - credential_exfiltration
+                - jailbreak_role
+                - system_prompt_extraction
+              privacy_policy:
+                - proprietary_code
+                - internal_document
+                - pii
+                - business_strategy
+                - trade_secret_ip
+                - operational_infrastructure
+                - locality_directive
+                - customer_data
+              frontier_reasoning:
+                - architecture_analysis
+                - root_cause_analysis
+                - multi_step_tradeoffs
+              local_standard:
+                - generic_coding
+                - simple_task
+                - general_knowledge
+              private:
+                - prompt_injection
+                - credential_exfiltration
+                - jailbreak_role
+                - system_prompt_extraction
+                - proprietary_code
+                - internal_document
+                - pii
+                - business_strategy
+                - trade_secret_ip
+                - operational_infrastructure
+                - locality_directive
+                - customer_data
+              public:
+                - architecture_analysis
+                - root_cause_analysis
+                - multi_step_tradeoffs
+                - generic_coding
+                - simple_task
+                - general_knowledge
+            metrics:
+              - name: private_vs_public
+                type: group_margin
+                positive_group: private
+                negative_group: public
+
+          - name: mmlu_kb
+            source:
+              path: knowledge_bases/mmlu/
+              manifest: labels.json
+            threshold: 0.25
+            groups:
+              escalate:
+                - biology
+                - business
+                - computer science
+                - economics
+                - history
+                - math
+                - other
+                - philosophy
+                - psychology
+              keep:
+                - chemistry
+                - engineering
+                - health
+                - law
+                - physics
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-semantic-router
+  annotations:
+    {{- range $key, $value := .Values.deploymentAnnotations }}
+    {{ $key }}: {{ $value | quote }}
+    {{- end }}
+spec:
+  replicas: {{ .Values.microservices.semanticRouter.replicas | default 2 }}
+  selector:
+    matchLabels:
+      app: {{ .Release.Name }}-semantic-router
+  template:
+    metadata:
+      labels:
+        app: {{ .Release.Name }}-semantic-router
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- $nodeSelector := include "bud.nodeSelector" (dict "service" .Values.microservices.semanticRouter "global" .Values.global "context" $) }}
+      {{- if $nodeSelector }}
+      nodeSelector:
+        {{- $nodeSelector | nindent 8 }}
+      {{- end }}
+      {{- $affinity := include "bud.affinity" (dict "service" .Values.microservices.semanticRouter "global" .Values.global "context" $) }}
+      {{- if $affinity }}
+      affinity:
+        {{- $affinity | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: semantic-router
+          image: {{ .Values.microservices.semanticRouter.image }}
+          imagePullPolicy: {{ .Values.imagePullPolicy }}
+          ports:
+            - name: api
+              containerPort: 8080
+              protocol: TCP
+            - name: metrics
+              containerPort: 9190
+              protocol: TCP
+            - name: extproc
+              containerPort: 50051
+              protocol: TCP
+          env:
+            # Tells SR which YAML to load. The mounted ConfigMap (see
+            # volumeMounts below) lands at this path.
+            - name: CONFIG_FILE
+              value: /app/config/config.yaml
+            # Expanded by SR's loader against the `${SR_REDIS_*}` placeholders
+            # in config.yaml (semantic_cache.redis, response_api.redis,
+            # startup_status.redis). Reuses the platform Valkey/Redis.
+            - name: SR_REDIS_HOST
+              value: {{ $.Values.externalServices.valkey.host | quote }}
+            - name: SR_REDIS_PORT
+              value: {{ $.Values.externalServices.valkey.port | quote }}
+            - name: SR_REDIS_PASSWORD
+              value: {{ $.Values.externalServices.valkey.password | quote }}
+            - name: SR_REDIS_DB
+              value: {{ $.Values.externalServices.valkey.databases.budgateway | quote }}
+            - name: TENSORZERO_REDIS_URL
+              value: "redis://default:{{ $.Values.externalServices.valkey.password }}@{{ $.Values.externalServices.valkey.host }}:{{ $.Values.externalServices.valkey.port }}/{{ $.Values.externalServices.valkey.databases.budgateway }}"
+            # Hard timeout for SR's per-request work — gateway's hard timeout
+            # is 500ms (FRD §5.1), so SR aims under that.
+            - name: ROUTER_REQUEST_TIMEOUT_MS_HARD
+              value: {{ .Values.microservices.semanticRouter.requestTimeoutMs.hard | default 500 | quote }}
+            - name: ROUTER_REQUEST_TIMEOUT_MS_RETRY
+              value: {{ .Values.microservices.semanticRouter.requestTimeoutMs.retry | default 200 | quote }}
+            # FRD §W2.5b: hard cap on outbound LLM calls per request.
+            # Default 10 (matches DefaultMaxOrchestratedCalls); 0 disables
+            # the cap entirely. Helm-tunable via maxOrchestratedCalls.
+            - name: ROUTER_MAX_ORCHESTRATED_CALLS
+              value: {{ .Values.microservices.semanticRouter.maxOrchestratedCalls | default 10 | quote }}
+            {{- with .Values.microservices.semanticRouter.configSource }}
+            {{- if eq (.type | default "file") "redis" }}
+            # FRD §W1.1/W1.4: SR boots with `config_source: redis` and
+            # watches `router_config:*` keys for per-router DAG updates
+            # published by budapp.
+            - name: ROUTER_CONFIG_SOURCE
+              value: "redis"
+            - name: ROUTER_REDIS_CONFIG_ADDRESS
+              value: "{{ $.Values.externalServices.valkey.host }}:{{ $.Values.externalServices.valkey.port }}"
+            - name: ROUTER_REDIS_CONFIG_PASSWORD
+              value: {{ $.Values.externalServices.valkey.password | quote }}
+            - name: ROUTER_REDIS_CONFIG_DB
+              value: {{ .redis.db | default $.Values.externalServices.valkey.databases.budgateway | quote }}
+            - name: ROUTER_REDIS_CONFIG_KEY_PREFIX
+              value: {{ .redis.keyPrefix | default "router_config:" | quote }}
+            {{- if .redis.keyspaceDB }}
+            - name: ROUTER_REDIS_CONFIG_KEYSPACE_DB
+              value: {{ .redis.keyspaceDB | quote }}
+            {{- end }}
+            {{- end }}
+            {{- end }}
+          {{- $root := . }}
+          {{- range $key, $value := .Values.microservices.semanticRouter.env }}
+            - name: {{ $key }}
+              value: {{ tpl $value $root | quote }}
+          {{- end }}
+          {{- with .Values.microservices.semanticRouter.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          volumeMounts:
+            - name: config
+              mountPath: /app/config/config.yaml
+              subPath: config.yaml
+              readOnly: true
+          # Cold-start loads ~5 GB of safetensors via mmap then upcasts
+          # to F32 (candle binding) — typically 30-90s warm, multiple
+          # minutes on a cold node where the OCI layer cache is empty.
+          # Without this probe, liveness (initialDelaySeconds=30,
+          # periodSeconds=30, default failureThreshold=3 → 120s budget)
+          # would kill the pod mid-load on a cold start.
+          startupProbe:
+            httpGet:
+              path: /ready
+              port: api
+            periodSeconds: 10
+            failureThreshold: 60   # 10 min total
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: api
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: api
+            initialDelaySeconds: 30
+            periodSeconds: 30
+      volumes:
+        - name: config
+          configMap:
+            name: {{ .Release.Name }}-semantic-router-config
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Release.Name }}-semantic-router
+  labels:
+    app: {{ .Release.Name }}-semantic-router
+spec:
+  type: ClusterIP
+  selector:
+    app: {{ .Release.Name }}-semantic-router
+  ports:
+    - name: api
+      port: {{ .Values.microservices.semanticRouter.service.apiPort | default 8080 }}
+      targetPort: api
+      protocol: TCP
+    - name: metrics
+      port: {{ .Values.microservices.semanticRouter.service.metricsPort | default 9190 }}
+      targetPort: metrics
+      protocol: TCP
+    - name: extproc
+      port: {{ .Values.microservices.semanticRouter.service.extprocPort | default 50051 }}
+      targetPort: extproc
+      protocol: TCP
+---
+{{- if .Values.microservices.semanticRouter.autoscaling.enabled }}
+{{- /*
+  HPA inlined (rather than using the `bud.hpa` helper) because the
+  helper supports only Resource-type metrics (CPU/memory utilisation),
+  while SR scales on a Prometheus custom metric — `sr_in_flight_requests`
+  exposed by prometheus-adapter from `llm_model_queue_depth_estimated`.
+  Mirrors templates/budgateway.yaml's pattern.
+
+  Why not CPU/memory: SR loads ~5–6 GiB of model weights at idle and
+  saturates CPU on any inference burst, so request-relative utilisation
+  is a constant near-100% — Resource-type HPA would scale on idle pods
+  and never scale down. See microservices.semanticRouter.autoscaling
+  block in values.yaml.
+*/ -}}
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: {{ .Release.Name }}-semantic-router
+  labels:
+    app: {{ .Release.Name }}-semantic-router
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: {{ .Release.Name }}-semantic-router
+  minReplicas: {{ .Values.microservices.semanticRouter.autoscaling.minReplicas | default 2 }}
+  maxReplicas: {{ .Values.microservices.semanticRouter.autoscaling.maxReplicas | default 6 }}
+  metrics:
+    {{- if .Values.microservices.semanticRouter.autoscaling.prometheusMetrics.enabled }}
+    - type: Pods
+      pods:
+        metric:
+          name: {{ .Values.microservices.semanticRouter.autoscaling.prometheusMetrics.metricName | default "sr_in_flight_requests" }}
+        target:
+          type: AverageValue
+          averageValue: {{ .Values.microservices.semanticRouter.autoscaling.prometheusMetrics.targetValue | default "8" }}
+    {{- end }}
+    {{- if .Values.microservices.semanticRouter.autoscaling.targetMemoryUtilizationPercentage }}
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: {{ .Values.microservices.semanticRouter.autoscaling.targetMemoryUtilizationPercentage }}
+    {{- end }}
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: {{ .Values.microservices.semanticRouter.autoscaling.scaleDownStabilizationSeconds | default 600 }}
+      policies:
+        - type: Percent
+          value: 50
+          periodSeconds: 60
+    scaleUp:
+      stabilizationWindowSeconds: {{ .Values.microservices.semanticRouter.autoscaling.scaleUpStabilizationSeconds | default 30 }}
+      policies:
+        - type: Percent
+          value: 100
+          periodSeconds: 15
+        - type: Pods
+          value: 2
+          periodSeconds: 15
+      selectPolicy: Max
+{{- end }}
+{{- end }}

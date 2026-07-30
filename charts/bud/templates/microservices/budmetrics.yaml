@@ -1,0 +1,210 @@
+{{- if (default .Values.microservices.budmetrics.enabled false) }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-budmetrics
+  annotations:
+    {{- range $key, $value := .Values.deploymentAnnotations }}
+    {{ $key }}: {{ $value | quote }}
+    {{- end }}
+spec:
+  {{- if not (and .Values.microservices.budmetrics.autoscaling .Values.microservices.budmetrics.autoscaling.enabled) }}
+  replicas: 1
+  {{- end }}
+  selector:
+    matchLabels:
+      app: {{ .Release.Name }}-budmetrics
+  template:
+    metadata:
+      labels:
+        app: {{ .Release.Name }}-budmetrics
+      annotations:
+        dapr.io/enabled: "true"
+        dapr.io/app-id: {{ .Values.microservices.budmetrics.daprid }}
+        dapr.io/app-port: "3005"
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- $nodeSelector := include "bud.nodeSelector" (dict "service" .Values.microservices.budmetrics "global" .Values.global "context" $) }}
+      {{- if $nodeSelector }}
+      nodeSelector:
+        {{- $nodeSelector | nindent 8 }}
+      {{- end }}
+      {{- $affinity := include "bud.affinity" (dict "service" .Values.microservices.budmetrics "global" .Values.global "context" $) }}
+      {{- if $affinity }}
+      affinity:
+        {{- $affinity | nindent 8 }}
+      {{- end }}
+      containers:
+      - name: {{ .Release.Name }}-budmetrics
+        image: {{ .Values.microservices.budmetrics.image }}
+        imagePullPolicy: {{ .Values.imagePullPolicy }}
+        command: ["sh", "-c", "python3 scripts/migrate_clickhouse.py && uvicorn budmetrics.main:app --host 0.0.0.0 --port 3005"]
+        ports:
+        - containerPort: 3005
+        env:
+          - name: PSQL_HOST
+            value: {{ $.Values.externalServices.postgresql.host | quote }}
+          - name: PSQL_PORT
+            value: {{ $.Values.externalServices.postgresql.port | quote }}
+          - name: PSQL_USER
+            value: {{ $.Values.externalServices.postgresql.databases.budmetrics.username | quote }}
+          - name: PSQL_PASSWORD
+            value: {{ $.Values.externalServices.postgresql.databases.budmetrics.password | quote }}
+          - name: PSQL_DB_NAME
+            value: {{ $.Values.externalServices.postgresql.databases.budmetrics.name | quote }}
+          - name: CLICKHOUSE_HOST
+            value: {{ $.Values.externalServices.clickhouse.host | quote }}
+          - name: CLICKHOUSE_PORT
+            value: {{ $.Values.externalServices.clickhouse.port | quote }}
+          - name: CLICKHOUSE_DB_NAME
+            value: {{ $.Values.externalServices.clickhouse.databases.budmetrics | quote }}
+          - name: SECRETS_CLICKHOUSE_USER
+            value: {{ $.Values.externalServices.clickhouse.auth.username | quote }}
+          - name: SECRETS_CLICKHOUSE_PASSWORD
+            value: {{ $.Values.externalServices.clickhouse.auth.password | quote }}
+          - name: CLICKHOUSE_USER
+            value: {{ $.Values.externalServices.clickhouse.auth.username | quote }}
+          - name: CLICKHOUSE_PASSWORD
+            value: {{ $.Values.externalServices.clickhouse.auth.password | quote }}
+          # ClickHouse TTL configuration for cluster metrics (in days)
+          - name: CLICKHOUSE_TTL_CLUSTER_METRICS
+            value: "30"
+          # ClickHouse TTL for OTel tables (in hours) — should match otelCollector.clickhouse.ttl
+          - name: CLICKHOUSE_TTL_OTEL_HOURS
+            value: "720"
+        {{ $root := . }}
+        {{- range $key, $value := .Values.microservices.budmetrics.env }}
+          - name: {{ $key }}
+            value: {{ tpl $value $root | quote }}
+        {{- end }}
+        envFrom:
+          - configMapRef:
+              name: {{ .Release.Name}}-bud-global
+        {{- with .Values.microservices.budmetrics.resources }}
+        resources:
+          {{- toYaml . | nindent 10 }}
+        {{- end }}
+        {{- include "bud.healthProbes" (dict "port" 3005 "probes" .Values.microservices.budmetrics.probes) | nindent 8 }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Release.Name }}-budmetrics
+spec:
+  ports:
+  - port: 3005
+    targetPort: 3005
+  selector:
+    app: {{ .Release.Name }}-budmetrics
+  type: ClusterIP
+---
+apiVersion: dapr.io/v2alpha1
+kind: Subscription
+metadata:
+  name: {{ .Release.Name }}-budmetrics-pubsub-subscription
+spec:
+  topic: budMetricsMessages
+  routes:
+    rules:
+    - match: event.type == "add_observability_metrics"
+      path: /observability/add
+    default: /notifications
+  pubsubname: {{ .Release.Name }}-pubsub
+  deadLetterTopic: poisonMessages
+  bulkSubscribe:
+    enabled: true
+    maxMessagesCount: 1
+    maxAwaitDurationMs: 50
+scopes:
+  - budmetrics
+{{- if and .Values.microservices.budmetrics.autoscaling .Values.microservices.budmetrics.autoscaling.enabled }}
+---
+{{- include "bud.hpa" (dict "serviceName" "budmetrics" "Values" .Values "Release" .Release) }}
+{{- end }}
+{{- $settle := .Values.microservices.budmetrics.settleCron | default dict }}
+{{- if ne $settle.enabled false }}
+---
+# Phase-2 steady-state settle cron (§6.0/§2.4). Drives ONE `migrate_clickhouse.py --settle-cycle`
+# on a schedule: turns staged spans into InferenceFact / AgentInvocationFact rows and keeps the
+# rollups + TraceSummary fresh. Without it the coalescing fact tables stop advancing (staged spans
+# TTL out at 6h). Single-writer is enforced by concurrencyPolicy: Forbid (primary) plus the in-DB
+# advisory lock (backstop). A plain CLI Job (not a Dapr cron binding) so single-writer is structural
+# and the settle runs OFF the API pods; no Dapr sidecar — the CLI talks to ClickHouse directly and a
+# sidecar would keep the Job pod from ever completing.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ .Release.Name }}-budmetrics-settle
+  labels:
+    app: {{ .Release.Name }}-budmetrics-settle
+spec:
+  schedule: {{ $settle.schedule | default "* * * * *" | quote }}
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: {{ $settle.startingDeadlineSeconds | default 60 }}
+  successfulJobsHistoryLimit: {{ $settle.successfulJobsHistoryLimit | default 1 }}
+  failedJobsHistoryLimit: {{ $settle.failedJobsHistoryLimit | default 3 }}
+  jobTemplate:
+    spec:
+      # A run killed mid-INSERT commits nothing but leaves the settle lock leased until it expires,
+      # stalling settles; keep this comfortably above a normal cycle so runs finish on their own.
+      activeDeadlineSeconds: {{ $settle.activeDeadlineSeconds | default 240 }}
+      backoffLimit: 0
+      template:
+        metadata:
+          labels:
+            app: {{ .Release.Name }}-budmetrics-settle
+        spec:
+          restartPolicy: Never
+          {{- with .Values.imagePullSecrets }}
+          imagePullSecrets:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- $nodeSelector := include "bud.nodeSelector" (dict "service" .Values.microservices.budmetrics "global" .Values.global "context" $) }}
+          {{- if $nodeSelector }}
+          nodeSelector:
+            {{- $nodeSelector | nindent 12 }}
+          {{- end }}
+          {{- $affinity := include "bud.affinity" (dict "service" .Values.microservices.budmetrics "global" .Values.global "context" $) }}
+          {{- if $affinity }}
+          affinity:
+            {{- $affinity | nindent 12 }}
+          {{- end }}
+          containers:
+          - name: budmetrics-settle
+            image: {{ .Values.microservices.budmetrics.image }}
+            imagePullPolicy: {{ .Values.imagePullPolicy }}
+            command: ["sh", "-c", "python3 scripts/migrate_clickhouse.py --settle-cycle"]
+            env:
+              - name: CLICKHOUSE_HOST
+                value: {{ $.Values.externalServices.clickhouse.host | quote }}
+              - name: CLICKHOUSE_PORT
+                value: {{ $.Values.externalServices.clickhouse.port | quote }}
+              - name: CLICKHOUSE_DB_NAME
+                value: {{ $.Values.externalServices.clickhouse.databases.budmetrics | quote }}
+              - name: SECRETS_CLICKHOUSE_USER
+                value: {{ $.Values.externalServices.clickhouse.auth.username | quote }}
+              - name: SECRETS_CLICKHOUSE_PASSWORD
+                value: {{ $.Values.externalServices.clickhouse.auth.password | quote }}
+              - name: CLICKHOUSE_USER
+                value: {{ $.Values.externalServices.clickhouse.auth.username | quote }}
+              - name: CLICKHOUSE_PASSWORD
+                value: {{ $.Values.externalServices.clickhouse.auth.password | quote }}
+            # Same operator env as the budmetrics Deployment so the settle cron sees the SAME
+            # fact-pipeline flags (INFERENCE_FACT / AGENT_INVOCATION_FACT + any CH overrides) —
+            # otherwise it would settle a different set of pipelines than the app expects.
+            {{- range $key, $value := .Values.microservices.budmetrics.env }}
+              - name: {{ $key }}
+                value: {{ tpl (toString $value) $ | quote }}
+            {{- end }}
+            envFrom:
+              - configMapRef:
+                  name: {{ .Release.Name }}-bud-global
+            {{- with $settle.resources }}
+            resources:
+              {{- toYaml . | nindent 14 }}
+            {{- end }}
+{{- end }}
+{{ end }}

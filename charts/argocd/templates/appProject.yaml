@@ -1,0 +1,9 @@
+{{- range $pName, $pValue := $.Values.projects }}
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: {{ $pName | quote }}
+spec:
+  {{- $pValue | toYaml | nindent 2}}
+---
+{{- end }}

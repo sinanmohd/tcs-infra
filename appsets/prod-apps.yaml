@@ -1,0 +1,74 @@
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: prod-apps
+  namespace: argocd
+spec:
+  goTemplate: true
+  goTemplateOptions: ["missingkey=error"]
+  generators:
+    - list:
+        elements:
+          - name: harbor
+            namespace: harbor
+            sources:
+              - repoURL: "ssh://git@github.com/BudEcosystem/bud-runtime"
+                targetRevision: HEAD
+                path: "infra/charts/harbor"
+                helm:
+                  releaseName: harbor
+                  valueFiles:
+                    - "/infra/values/harbor/values.bud.yaml"
+                    - "/infra/values/harbor/secrets.bud.yaml"
+          - name: keycloak
+            namespace: keycloak
+            sources:
+              - repoURL: "ssh://git@github.com/BudEcosystem/bud-runtime"
+                targetRevision: HEAD
+                path: "infra/charts/keycloak"
+                helm:
+                  releaseName: keycloak
+                  valueFiles:
+                    - "/infra/values/keycloak/values.budruntime.yaml"
+                    - "/infra/values/keycloak/values.bud.yaml"
+                    - "/infra/values/keycloak/secrets.bud.yaml"
+          - name: bud
+            namespace: bud-dev
+            sources:
+              - repoURL: "ssh://git@github.com/BudEcosystem/bud-runtime"
+                targetRevision: HEAD
+                path: "infra/charts/bud"
+                helm:
+                  releaseName: bud
+                  valueFiles:
+                    - "/infra/values/bud/values.dev.bud.yaml"
+                    - "/infra/values/bud/secrets.bud.yaml"
+  template:
+    metadata:
+      name: "{{.name}}"
+      annotations:
+        notifications.argoproj.io/subscribe.on-created.slack: infra
+        notifications.argoproj.io/subscribe.on-deleted.slack: infra
+        notifications.argoproj.io/subscribe.on-deployed.slack: infra
+        notifications.argoproj.io/subscribe.on-health-degraded.slack: infra
+        notifications.argoproj.io/subscribe.on-sync-failed.slack: infra
+        notifications.argoproj.io/subscribe.on-sync-running.slack: infra
+        notifications.argoproj.io/subscribe.on-sync-status-unknown.slack: infra
+        notifications.argoproj.io/subscribe.on-sync-succeeded.slack: infra
+    spec:
+      project: default
+      destination:
+        server: "https://kubernetes.default.svc"
+        namespace: "{{.namespace}}"
+      syncPolicy:
+        syncOptions:
+          - CreateNamespace=true
+          - ServerSideApply=true
+          - Prune=confirm
+        automated:
+          enabled: false
+          selfHeal: true
+  templatePatch: |
+    spec:
+      sources:
+        {{- .sources | toYaml | nindent 6 }}

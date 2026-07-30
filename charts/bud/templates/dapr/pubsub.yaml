@@ -1,0 +1,22 @@
+apiVersion: dapr.io/v1alpha1
+kind: Component
+metadata:
+  name: {{ .Release.Name }}-pubsub
+spec:
+  type: pubsub.kafka
+  version: v1
+  metadata:
+  - name: brokers
+    value: {{ $.Values.externalServices.kafka.endpoint | quote }}
+  - name: authType
+    value: "password"
+  - name: saslUsername
+    value: {{ $.Values.externalServices.kafka.auth.username | quote }}
+  - name: saslPassword
+    value: {{ $.Values.externalServices.kafka.auth.password | quote }}
+  - name: saslMechanism
+    value: "SHA-512"
+  - name: disableTls
+    value: true
+  - name: consumerGroup
+    value: "{{ $.Release.Namespace }}-{{ $.Release.Name }}"

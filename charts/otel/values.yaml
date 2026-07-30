@@ -1,0 +1,6 @@
+exporters: {}
+monitoring: {}
+clusterName: "master"
+
+opentelemetry-operator:
+  enabled: true

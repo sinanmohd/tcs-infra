@@ -1,0 +1,193 @@
+apiVersion: dapr.io/v1alpha1
+kind: Component
+metadata:
+  name: periodic-node-status-update
+spec:
+  type: bindings.cron
+  version: v1
+  metadata:
+  - name: schedule
+    value: "@every 10m" # Every 10 minutes
+  - name: direction
+    value: "input"
+  - name: route
+    value: "/cluster/periodic-node-status-update"
+scopes:
+  - budcluster
+---
+apiVersion: dapr.io/v1alpha1
+kind: Component
+metadata:
+  name: periodic-node-metrics-collection
+spec:
+  type: bindings.cron
+  version: v1
+  metadata:
+  - name: schedule
+    value: "@every 5m" # Every 5 minutes
+  - name: direction
+    value: "input"
+  - name: route
+    value: "/metrics/collect-all-cluster-metrics"
+scopes:
+  - budcluster
+
+---
+apiVersion: dapr.io/v1alpha1
+kind: Component
+metadata:
+  name: periodic-deployment-status-update
+spec:
+  type: bindings.cron
+  version: v1
+  metadata:
+  - name: schedule
+    value: "@every 3m" # Every 3 minutes
+  - name: direction
+    value: "input"
+  - name: route
+    value: "/deployment/periodic-deployment-status-update"
+scopes:
+  - budcluster
+
+---
+apiVersion: dapr.io/v1alpha1
+kind: Component
+metadata:
+  name: cluster-recommended-scheduler
+spec:
+  type: bindings.cron
+  version: v1
+  metadata:
+  - name: schedule
+    value: "@every 24h" # Every 24 hours
+  - name: direction
+    value: "input"
+  - name: route
+    value: "/clusters/recommended-scheduler"
+scopes:
+  - budapp
+---
+apiVersion: dapr.io/v1alpha1
+kind: Component
+metadata:
+  name: agent-health-check-scheduler
+spec:
+  type: bindings.cron
+  version: v1
+  metadata:
+  - name: schedule
+    value: "@every 1h" # Every 1 hour
+  - name: direction
+    value: "input"
+  - name: route
+    value: "/prompts/agent-health-check"
+scopes:
+  - budapp
+---
+apiVersion: dapr.io/v1alpha1
+kind: Component
+metadata:
+  name: prompt-cleanup-scheduler
+spec:
+  type: bindings.cron
+  version: v1
+  metadata:
+  - name: schedule
+    value: "@every 12h" # Every 12 hours
+  - name: direction
+    value: "input"
+  - name: route
+    value: "/v1/prompt/prompt-cleanup-cron"
+scopes:
+  - budprompt
+
+---
+apiVersion: dapr.io/v1alpha1
+kind: Component
+metadata:
+  name: a2a-cleanup-scheduler
+spec:
+  type: bindings.cron
+  version: v1
+  metadata:
+  - name: schedule
+    value: "@every 12h" # Every 12 hours
+  - name: direction
+    value: "input"
+  - name: route
+    value: "/a2a/cleanup-cron"
+scopes:
+  - budprompt
+
+---
+apiVersion: dapr.io/v1alpha1
+kind: Component
+metadata:
+  name: leaderboard-extraction-scheduler
+spec:
+  type: bindings.cron
+  version: v1
+  metadata:
+  - name: schedule
+    value: "@every 168h"  # Every 7 days (7 * 24 hours)
+  - name: direction
+    value: "input"
+  - name: route
+    value: "/leaderboard/extraction-cron"
+scopes:
+  - budmodel
+
+---
+apiVersion: dapr.io/v1alpha1
+kind: Component
+metadata:
+  name: registry-cleanup-scheduler
+spec:
+  type: bindings.cron
+  version: v1
+  metadata:
+  - name: schedule
+    value: "@every 24h"  # Daily TTL sweep over model_registry_history
+  - name: direction
+    value: "input"
+  - name: route
+    value: "/model-info/registry-cleanup-cron"
+scopes:
+  - budmodel
+
+---
+apiVersion: dapr.io/v1alpha1
+kind: Component
+metadata:
+  name: budpipeline-schedule-poll
+spec:
+  type: bindings.cron
+  version: v1
+  metadata:
+  - name: schedule
+    value: "@every 1m"  # Poll schedules every minute
+  - name: direction
+    value: "input"
+  - name: route
+    value: "/internal/schedule-poll"
+scopes:
+  - budpipeline
+
+---
+apiVersion: dapr.io/v1alpha1
+kind: Component
+metadata:
+  name: budevent-session-reaper
+spec:
+  type: bindings.cron
+  version: v1
+  metadata:
+  - name: schedule
+    value: "@every 24h"  # Daily TTL sweep over thread_sessions (BUDEVENT_SESSION_TTL_DAYS)
+  - name: direction
+    value: "input"
+  - name: route
+    value: "/cron/session-reaper"
+scopes:
+  - budevent

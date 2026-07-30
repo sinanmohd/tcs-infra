@@ -1,0 +1,141 @@
+global:
+    ingress:
+        hosts:
+            root: sinan.bud.studio
+
+# disable keel
+deploymentAnnotations: null
+
+imagePullPolicy: Always
+
+microservices:
+    budmodel:
+        enabled: false
+    buddoc:
+        enabled: false
+    askbud:
+        enabled: false
+    budpipeline:
+        enabled: false
+    budusecases:
+        enabled: false
+    budplayground:
+        enabled: false
+    budcustomer:
+        enabled: false
+    budeval:
+        enabled: false
+    budcodeinterpreter:
+        image: registry.bud.studio/runtime/budcodeinterpreter:osb
+    budsentinel:
+        enabled: false
+    semanticRouter:
+        enabled: false
+
+storage:
+    budmodelRegistry:
+        className: "openebs-lvm"
+    budmodelAddDir:
+        className: "openebs-lvm"
+    budevalDataset:
+        className: "openebs-lvm"
+    budappStaticDir:
+        className: "openebs-lvm"
+
+prometheus:
+    server:
+        persistentVolume:
+            storageClass: "openebs-lvm"
+
+externalServices:
+    oidc:
+        url: "https://auth.bud.studio/realms/bud-keycloak"
+    s3:
+        secure: true
+        endpoint: "s3.bud.studio"
+        buckets:
+            modelRegistry: "bud-models-registry"
+            modelInfo: "bud-model-info"
+            novu: "bud-novu"
+    mongodb:
+        auth:
+            username: "bud_novu_sinan"
+            password: "bud_novu"
+        databases:
+            novu: "bud_novu_sinan"
+    valkey:
+        databases:
+            config_store: 32
+            state_store: 33
+            novu: 34
+            budgateway: 35
+            mcpgateway: 36
+            budprompt: 37
+            global: 38
+            onyx: 39
+    clickhouse:
+        databases:
+            budeval: "bud_eval_sinan"
+            budgateway: "bud_gateway_sinan"
+            budmetrics: "metrics_sinan"
+    kafka:
+        topics:
+            pubsub: "bud_pubsub_sinan"
+            budgateway: "bud_gateway_sinan"
+    postgresql:
+        databases:
+            budask:
+                name: "budask-sinan"
+                username: "bud-sinan"
+            budapp:
+                name: "budapp-sinan"
+                username: "bud-sinan"
+            budcluster:
+                name: "budcluster-sinan"
+                username: "bud-sinan"
+            budmetrics:
+                name: "budmetrics-sinan"
+                username: "bud-sinan"
+            budmodel:
+                username: "bud-sinan"
+                name: "budmodel-sinan"
+            budsim:
+                username: "bud-sinan"
+                name: "budsim-sinan"
+            budeval:
+                name: "budeval-sinan"
+                username: "bud-sinan"
+            buddoc:
+                name: "buddoc-sinan"
+                username: "bud-sinan"
+            budprompt:
+                name: "budprompt-sinan"
+                username: "bud-sinan"
+            mcpgateway:
+                name: "mcpgateway-sinan"
+                username: "bud-sinan"
+            budpipeline:
+                name: "budpipeline-sinan"
+                username: "bud-sinan"
+            onyx:
+                name: "onyx-sinan"
+                username: "bud-sinan"
+            budevent:
+                name: "budevent-sinan"
+                username: "bud-sinan"
+            budcodeinterpreter:
+                name: "budcodeinterpreter-sinan"
+                username: "bud-sinan"
+novu:
+    api:
+        env:
+            REDIS_DB_INDEX: "34"
+    externalDatabase:
+        username: "bud_novu_sinan"
+        password: "bud_novu"
+        database: "bud_novu_sinan"
+    externalS3:
+        bucketName: "bud-novu"
+
+prometheus-adapter:
+    enabled: false

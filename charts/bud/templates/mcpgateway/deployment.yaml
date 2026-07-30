@@ -1,0 +1,120 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-mcpgateway
+  annotations:
+    {{- range $key, $value := .Values.deploymentAnnotations }}
+    {{ $key }}: {{ $value | quote }}
+    {{- end }}
+spec:
+  {{- if not (and .Values.microservices.mcpgateway.autoscaling .Values.microservices.mcpgateway.autoscaling.enabled) }}
+  replicas: 1
+  {{- end }}
+  selector:
+    matchLabels:
+      app: {{ .Release.Name }}-mcpgateway
+  template:
+    metadata:
+      labels:
+        app: {{ .Release.Name }}-mcpgateway
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- $nodeSelector := include "bud.nodeSelector" (dict "service" .Values.microservices.mcpgateway "global" .Values.global "context" $) }}
+      {{- if $nodeSelector }}
+      nodeSelector:
+        {{- $nodeSelector | nindent 8 }}
+      {{- end }}
+      {{- $affinity := include "bud.affinity" (dict "service" .Values.microservices.mcpgateway "global" .Values.global "context" $) }}
+      {{- if $affinity }}
+      affinity:
+        {{- $affinity | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: mcpgateway
+          image: {{ .Values.microservices.mcpgateway.image }}
+          imagePullPolicy: {{ .Values.imagePullPolicy }}
+          command: ["./run-gunicorn.sh"]
+          ports:
+            - containerPort: 4444
+          env:
+            - name: PASSWORD_REQUIRE_NUMBERS
+              value: "false"
+            - name: MIN_PASSWORD_LENGTH
+              value: "8"
+            - name: HOST
+              value: "0.0.0.0"
+
+            - name: MCPGATEWAY_UI_AIRGAPPED
+              value: "true"
+            - name: MCPGATEWAY_UI_ENABLED
+              value: "true"
+            - name: MCPGATEWAY_ADMIN_API_ENABLED
+              value: "true"
+            - name: SSRF_PROTECTION_ENABLED
+              value: {{ .Values.microservices.mcpgateway.ssrfProtectionEnabled | default false | toString | quote }}
+            - name: ENVIRONMENT
+              value: "production"
+            - name: APP_DOMAIN
+              value: {{ include "bud.ingress.url.mcpgateway" $ }}
+            - name: PLATFORM_ADMIN_FULL_NAME
+              value: "Platform Administrator"
+            - name: REDIS_URL
+              value: "redis://default:{{ $.Values.externalServices.valkey.password }}@{{ $.Values.externalServices.valkey.host }}:{{ $.Values.externalServices.valkey.port }}/{{ $.Values.externalServices.valkey.databases.mcpgateway }}"
+            - name: DATABASE_URL
+              value: "postgresql://{{ .Values.externalServices.postgresql.databases.mcpgateway.username }}:{{ .Values.externalServices.postgresql.databases.mcpgateway.password }}@{{ .Values.externalServices.postgresql.databases.mcpgateway.host | default .Values.externalServices.postgresql.host }}:{{ .Values.externalServices.postgresql.port }}/{{ .Values.externalServices.postgresql.databases.mcpgateway.name }}"
+          {{- if .Values.microservices.mcpgateway.sso.enabled }}
+            - name: SSO_ENABLED
+              value: "true"
+            # Native Keycloak SSO provider (base URL + realm split). Distinct from the
+            # SSO_GENERIC_* block below: connector OAuth flows 401 without it because
+            # issuer discovery and role sync need the Keycloak server base URL.
+            - name: SSO_KEYCLOAK_ENABLED
+              value: "true"
+            - name: SSO_KEYCLOAK_BASE_URL
+              value: {{ $.Values.externalServices.keycloak.url | quote }}
+            - name: SSO_KEYCLOAK_REALM
+              value: {{ $.Values.externalServices.keycloak.realm | quote }}
+            - name: SSO_KEYCLOAK_CLIENT_ID
+              value: {{ $.Values.externalServices.keycloak.clients.mcpgateway.id | quote }}
+            - name: SSO_KEYCLOAK_CLIENT_SECRET
+              value: {{ $.Values.externalServices.keycloak.clients.mcpgateway.secret | quote }}
+            # Accepted issuers for externally-minted JWTs (same issuer as the generic
+            # OIDC realm URL).
+            - name: EXTERNAL_JWT_ISSUERS
+              value: {{ $.Values.externalServices.oidc.url | quote }}
+            - name: SSO_GENERIC_ENABLED
+              value: "true"
+            - name: SSO_GENERIC_PROVIDER_ID
+              value: "keycloak"
+            - name: SSO_GENERIC_DISPLAY_NAME
+              value: "keycloak"
+            - name: SSO_GENERIC_CLIENT_ID
+              value: {{ $.Values.externalServices.oidc.clients.mcpgateway.id | quote }}
+            - name: SSO_GENERIC_CLIENT_SECRET
+              value: {{ $.Values.externalServices.oidc.clients.mcpgateway.secret | quote }}
+            - name: SSO_GENERIC_AUTHORIZATION_URL
+              value: "{{ $.Values.externalServices.oidc.url }}/protocol/openid-connect/auth"
+            - name: SSO_GENERIC_TOKEN_URL
+              value: "{{ $.Values.externalServices.oidc.url }}/protocol/openid-connect/token"
+            - name: SSO_GENERIC_USERINFO_URL
+              value: "{{ $.Values.externalServices.oidc.url }}/protocol/openid-connect/userinfo"
+            - name: SSO_GENERIC_ISSUER
+              value: {{ $.Values.externalServices.oidc.url | quote }}
+            - name: SSO_GENERIC_JWKS_URI
+              value: "{{ $.Values.externalServices.oidc.url }}/protocol/openid-connect/certs"
+            - name: EXTERNAL_JWT_VALIDATION_ENABLED
+              value: {{ .Values.microservices.mcpgateway.sso.externalJwtValidation | toString | quote }}
+            - name: SSO_AUTO_CREATE_USERS
+              value: "false"
+          {{- end }}
+          {{ $root := . }}
+          {{- range $key, $value := .Values.microservices.mcpgateway.env }}
+            - name: {{ $key }}
+              value: {{ tpl $value $root | quote }}
+          {{- end }}
+          resources:
+            {{- $defaultResources := dict "limits" (dict "cpu" "2000m" "memory" "4096Mi") "requests" (dict "cpu" "1000m" "memory" "2048Mi") }}
+            {{- toYaml (default $defaultResources .Values.microservices.mcpgateway.resources) | nindent 12 }}

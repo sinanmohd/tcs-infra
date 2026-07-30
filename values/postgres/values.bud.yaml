@@ -1,0 +1,33 @@
+storageClass: "openebs-lvm"
+
+users:
+  signoz:
+    password: "signoz"
+    databases:
+      - signoz
+  monitoring:
+    password: "monitoring"
+    inRoles:
+      - pg_monitor
+      - pg_read_all_stats
+  harbor:
+    password: "harbor"
+    databases:
+      - harbor
+  bud-sinan:
+    password: "bud"
+    databases:
+      - budask-sinan
+      - budapp-sinan
+      - budcluster-sinan
+      - budmetrics-sinan
+      - budmodel-sinan
+      - budsim-sinan
+      - budeval-sinan
+      - budevent-sinan
+      - buddoc-sinan
+      - budprompt-sinan
+      - budcodeinterpreter-sinan
+      - mcpgateway-sinan
+      - budpipeline-sinan
+      - onyx-sinan

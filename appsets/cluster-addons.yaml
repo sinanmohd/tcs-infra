@@ -1,0 +1,219 @@
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: cluster-addons
+  namespace: argocd
+spec:
+  goTemplate: true
+  goTemplateOptions: ["missingkey=error"]
+  generators:
+    - list:
+        elements:
+          - name: argocd
+            namespace: argocd
+            sources:
+              - repoURL: "ssh://git@github.com/BudEcosystem/bud-runtime"
+                targetRevision: HEAD
+                path: "infra/charts/argocd"
+                helm:
+                  releaseName: argocd
+                  valueFiles:
+                    - "/infra/values/argocd/values.bud.yaml"
+                    - "/infra/values/argocd/secrets.bud.yaml"
+          - name: dapr
+            namespace: dapr-system
+            sources:
+              - repoURL: https://dapr.github.io/helm-charts
+                targetRevision: 1.17.5
+                chart: dapr
+                helm:
+                  releaseName: dapr
+                  valueFiles:
+                    - "$values/infra/values/dapr/values.yaml"
+                    - "$values/infra/values/dapr/values.bud.yaml"
+              - repoURL: "ssh://git@github.com/BudEcosystem/bud-runtime"
+                targetRevision: HEAD
+                ref: values
+          - name: keel
+            namespace: keel
+            sources:
+              - repoURL: https://charts.keel.sh
+                targetRevision: 1.0.5
+                chart: keel
+                helm:
+                  releaseName: keel
+                  valueFiles:
+                    - "$values/infra/values/keel/values.yaml"
+                    - "$values/infra/values/keel/values.bud.yaml"
+                    - "$values/infra/values/keel/secrets.bud.yaml"
+              - repoURL: "ssh://git@github.com/BudEcosystem/bud-runtime"
+                targetRevision: HEAD
+                ref: values
+          - name: kafka
+            namespace: kafka
+            sources:
+              - repoURL: "ssh://git@github.com/BudEcosystem/bud-runtime"
+                targetRevision: HEAD
+                path: "infra/charts/kafka"
+                helm:
+                  releaseName: kafka
+                  valueFiles:
+                    - "/infra/values/kafka/values.budruntime.yaml"
+                    - "/infra/values/kafka/values.bud.yaml"
+                    - "/infra/values/kafka/secrets.bud.yaml"
+          - name: mongodb
+            namespace: mongodb
+            sources:
+              - repoURL: "ssh://git@github.com/BudEcosystem/bud-runtime"
+                targetRevision: HEAD
+                path: "infra/charts/mongodb"
+                helm:
+                  releaseName: mongodb
+                  valueFiles:
+                    - "/infra/values/mongodb/values.budruntime.yaml"
+                    - "/infra/values/mongodb/values.bud.yaml"
+                    - "/infra/values/mongodb/secrets.bud.yaml"
+          - name: cert-manager
+            namespace: cert-manager
+            sources:
+              - repoURL: "ssh://git@github.com/BudEcosystem/bud-runtime"
+                targetRevision: HEAD
+                path: "infra/charts/cert-manager"
+                helm:
+                  releaseName: cert-manager
+                  valueFiles: []
+          - name: clickhouse
+            namespace: clickhouse
+            sources:
+              - repoURL: "ssh://git@github.com/BudEcosystem/bud-runtime"
+                targetRevision: HEAD
+                path: "infra/charts/clickhouse"
+                helm:
+                  releaseName: clickhouse
+                  valueFiles:
+                    - "/infra/values/clickhouse/values.budruntime.yaml"
+                    - "/infra/values/clickhouse/values.bud.yaml"
+                    - "/infra/values/clickhouse/secrets.bud.yaml"
+          - name: openebs
+            namespace: openebs
+            sources:
+              - repoURL: "ssh://git@github.com/BudEcosystem/bud-runtime"
+                targetRevision: HEAD
+                path: "infra/charts/openebs"
+                helm:
+                  releaseName: openebs
+                  valueFiles:
+                    - "/infra/values/openebs/values.bud.yaml"
+          - name: otel
+            namespace: otel
+            sources:
+              - repoURL: "ssh://git@github.com/BudEcosystem/bud-runtime"
+                targetRevision: HEAD
+                path: "infra/charts/otel"
+                helm:
+                  releaseName: otel
+                  valueFiles:
+                    - "/infra/values/otel/values.bud.yaml"
+                    - "/infra/values/otel/secrets.bud.yaml"
+          - name: postgres
+            namespace: postgres
+            sources:
+              - repoURL: "ssh://git@github.com/BudEcosystem/bud-runtime"
+                targetRevision: HEAD
+                path: "infra/charts/postgres"
+                helm:
+                  releaseName: postgres
+                  valueFiles:
+                    - "/infra/values/postgres/values.budruntime.yaml"
+                    - "/infra/values/postgres/values.bud.yaml"
+                    - "/infra/values/postgres/secrets.bud.yaml"
+          - name: seaweedfs
+            namespace: seaweedfs
+            sources:
+              - repoURL: "ssh://git@github.com/BudEcosystem/bud-runtime"
+                targetRevision: HEAD
+                path: "infra/charts/seaweedfs"
+                helm:
+                  releaseName: seaweedfs
+                  valueFiles:
+                    - "/infra/values/seaweedfs/values.budruntime.yaml"
+                    - "/infra/values/seaweedfs/values.bud.yaml"
+                    - "/infra/values/seaweedfs/secrets.bud.yaml"
+          - name: signoz
+            namespace: signoz
+            sources:
+              - repoURL: "ssh://git@github.com/BudEcosystem/bud-runtime"
+                targetRevision: HEAD
+                path: "infra/charts/signoz"
+                helm:
+                  releaseName: signoz
+                  valueFiles:
+                    - "/infra/values/signoz/values.bud.yaml"
+                    - "/infra/values/signoz/secrets.bud.yaml"
+          - name: valkey
+            namespace: valkey
+            sources:
+              - repoURL: registry-1.docker.io/cloudpirates
+                chart: valkey
+                targetRevision: "0.21.4"
+                helm:
+                  releaseName: valkey
+                  valueFiles:
+                    - "$values/infra/values/valkey/values.yaml"
+                    - "$values/infra/values/valkey/values.budruntime.yaml"
+                    - "$values/infra/values/valkey/values.bud.yaml"
+                    - "$values/infra/values/valkey/secrets.bud.yaml"
+              - repoURL: "ssh://git@github.com/BudEcosystem/bud-runtime"
+                targetRevision: HEAD
+                ref: values
+          - name: valkey-cluster
+            namespace: valkey-cluster
+            sources:
+              - repoURL: "ssh://git@github.com/BudEcosystem/bud-runtime"
+                targetRevision: HEAD
+                path: "infra/charts/valkey-cluster"
+                helm:
+                  releaseName: valkey-cluster
+                  valueFiles:
+                    - "/infra/values/valkey-cluster/values.budruntime.yaml"
+                    - "/infra/values/valkey-cluster/secrets.bud.yaml"
+          - name: velero
+            namespace: velero
+            sources:
+              - repoURL: "ssh://git@github.com/BudEcosystem/bud-runtime"
+                targetRevision: HEAD
+                path: "infra/charts/velero"
+                helm:
+                  releaseName: velero
+                  valueFiles:
+                    - "/infra/values/velero/values.bud.yaml"
+                    - "/infra/values/velero/secrets.bud.yaml"
+  template:
+    metadata:
+      name: "{{.name}}"
+      annotations:
+        notifications.argoproj.io/subscribe.on-created.slack: infra
+        notifications.argoproj.io/subscribe.on-deleted.slack: infra
+        notifications.argoproj.io/subscribe.on-deployed.slack: infra
+        notifications.argoproj.io/subscribe.on-health-degraded.slack: infra
+        notifications.argoproj.io/subscribe.on-sync-failed.slack: infra
+        notifications.argoproj.io/subscribe.on-sync-running.slack: infra
+        notifications.argoproj.io/subscribe.on-sync-status-unknown.slack: infra
+        notifications.argoproj.io/subscribe.on-sync-succeeded.slack: infra
+    spec:
+      project: default
+      destination:
+        server: "https://kubernetes.default.svc"
+        namespace: "{{.namespace}}"
+      syncPolicy:
+        syncOptions:
+          - CreateNamespace=true
+          - ServerSideApply=true
+          - Prune=confirm
+        automated:
+          enabled: false
+          selfHeal: true
+  templatePatch: |
+    spec:
+      sources:
+        {{- .sources | toYaml | nindent 6 }}

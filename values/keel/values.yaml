@@ -1,0 +1,2 @@
+helmProvider:
+  version: "v3"

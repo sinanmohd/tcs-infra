@@ -1,0 +1,21 @@
+passwords:
+  bud: bud
+
+instance:
+  bud:
+    workloadType: StatefulSet
+    replicas: 1
+    shards: 1
+    config:
+      databases: "16"
+      notify-keyspace-events: "KEA"
+    persistence:
+      size: 1Gi
+      storageClassName: openebs-lvm
+      reclaimPolicy: Retain
+    users:
+      - name: bud
+        passwordSecret:
+          name: valkey-user-passwords
+          keys: [bud]
+        permissions: "+@all ~* &*"

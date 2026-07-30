@@ -1,0 +1,135 @@
+{{- if (default .Values.microservices.budcluster.enabled false) }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-budcluster
+  annotations:
+    {{- range $key, $value := .Values.deploymentAnnotations }}
+    {{ $key }}: {{ $value | quote }}
+    {{- end }}
+spec:
+  {{- if not (and .Values.microservices.budcluster.autoscaling .Values.microservices.budcluster.autoscaling.enabled) }}
+  replicas: 1
+  {{- end }}
+  selector:
+    matchLabels:
+      app: {{ .Release.Name }}-budcluster
+  template:
+    metadata:
+      labels:
+        app: {{ .Release.Name }}-budcluster
+      annotations:
+        dapr.io/enabled: "true"
+        dapr.io/app-id: {{ .Values.microservices.budcluster.daprid }}
+        dapr.io/app-port: "3003"
+        dapr.io/volume-mounts: "crypto-keys:/mnt/crypto-keys"
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- $nodeSelector := include "bud.nodeSelector" (dict "service" .Values.microservices.budcluster "global" .Values.global "context" $) }}
+      {{- if $nodeSelector }}
+      nodeSelector:
+        {{- $nodeSelector | nindent 8 }}
+      {{- end }}
+      {{- $affinity := include "bud.affinity" (dict "service" .Values.microservices.budcluster "global" .Values.global "context" $) }}
+      {{- if $affinity }}
+      affinity:
+        {{- $affinity | nindent 8 }}
+      {{- end }}
+      containers:
+      - name: {{ .Release.Name }}-budcluster
+        image: {{ .Values.microservices.budcluster.image }}
+        imagePullPolicy: {{ .Values.imagePullPolicy }}
+        command: ["sh", "-c", "alembic -c ./budcluster/alembic.ini upgrade head && uvicorn budcluster.main:app --host 0.0.0.0 --port 3003"]
+        ports:
+        - containerPort: 3003
+        env:
+          - name: BUD_SERVE_URL
+            value: {{ include "bud.ingress.url.budapp" $ }}
+          - name: NOTIFY_SERVICE_NAME
+            value: "{{ .Values.microservices.budnotify.daprid }}"
+          - name: NOTIFY_SERVICE_TOPIC
+            value: "{{ $.Release.Namespace }}-{{ $.Release.Name }}-{{ .Values.microservices.budnotify.pubsubTopic }}"
+          # postgresql
+          - name: PSQL_HOST
+            value: {{ $.Values.externalServices.postgresql.host | quote }}
+          - name: PSQL_PORT
+            value: {{ $.Values.externalServices.postgresql.port | quote }}
+          - name: PSQL_USER
+            value: {{ $.Values.externalServices.postgresql.databases.budcluster.username | quote }}
+          - name: PSQL_PASSWORD
+            value: {{ $.Values.externalServices.postgresql.databases.budcluster.password | quote }}
+          - name: PSQL_DB_NAME
+            value: {{ $.Values.externalServices.postgresql.databases.budcluster.name | quote }}
+          # s3
+          - name: MINIO_ENDPOINT
+            value: {{ $.Values.externalServices.s3.endpoint }}
+          - name: MINIO_ACCESS_KEY
+            value: {{ $.Values.externalServices.s3.auth.accessKey | quote }}
+          - name: MINIO_SECRET_KEY
+            value: {{ $.Values.externalServices.s3.auth.secretKey | quote }}
+          - name: MINIO_BUCKET
+            value: {{ .Values.externalServices.s3.buckets.modelRegistry }}
+          - name: MINIO_SECURE
+            value: {{ $.Values.externalServices.s3.secure | default false | quote }}
+          # Private image registry creds forwarded to runtime/quant pods on target clusters
+          # as dockerconfigjson pull secrets. Reuses the chart's existing registry creds.
+          - name: IMAGE_REGISTRIES
+            value: {{ .Values.registries | default dict | toJson | quote }}
+        {{ $root := . }}
+        {{- range $key, $value := .Values.microservices.budcluster.env }}
+          - name: {{ $key }}
+            value: {{ tpl $value $root | quote }}
+        {{- end }}
+        envFrom:
+          - configMapRef:
+              name: {{ .Release.Name}}-bud-global
+        {{- with .Values.microservices.budcluster.resources }}
+        resources:
+          {{- toYaml . | nindent 10 }}
+        {{- end }}
+        {{- include "bud.healthProbes" (dict "port" 3003 "probes" .Values.microservices.budcluster.probes) | nindent 8 }}
+        volumeMounts:
+        - name: crypto-keys
+          mountPath: /root/.cache/budserve/keys
+        - name: models-registry
+          mountPath: /data/models-registry
+      volumes:
+      - name: crypto-keys
+        secret:
+          secretName: {{ .Release.Name }}-dapr-crypto
+      - name: models-registry
+        persistentVolumeClaim:
+          claimName: {{ .Release.Name }}-bud-models-registry
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Release.Name }}-budcluster
+spec:
+  ports:
+  - port: 3003
+    targetPort: 3003
+  selector:
+    app: {{ .Release.Name }}-budcluster
+  type: ClusterIP
+---
+apiVersion: dapr.io/v2alpha1
+kind: Subscription
+metadata:
+  name: {{ .Release.Name }}-budcluster-pubsub-subscription
+spec:
+  topic: budClusterMessages
+  routes:
+    default: /notifications
+  pubsubname: {{ .Release.Name }}-pubsub
+  deadLetterTopic: poisonMessages
+scopes:
+  - budcluster
+{{- if and .Values.microservices.budcluster.autoscaling .Values.microservices.budcluster.autoscaling.enabled }}
+---
+{{- include "bud.hpa" (dict "serviceName" "budcluster" "Values" .Values "Release" .Release) }}
+{{- end }}
+{{ end }}

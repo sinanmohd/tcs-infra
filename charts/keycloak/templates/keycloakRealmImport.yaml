@@ -1,0 +1,18 @@
+{{- range $key, $value := $.Values.realms }}
+apiVersion: k8s.keycloak.org/v2beta1
+kind: KeycloakRealmImport
+metadata:
+  name: {{ $key | quote }}
+spec:
+  keycloakCRName: keycloak
+
+  realm:
+    {{- $value.spec | toYaml | nindent 4 }}
+    {{- if $value.clients }}
+    clients:
+    {{- range $clientName, $clientValue := $value.clients }}
+      - clientId: {{ $clientName | quote }}
+        {{- $clientValue | toYaml | nindent 8 }}
+    {{- end }}
+    {{- end }}
+{{- end }}

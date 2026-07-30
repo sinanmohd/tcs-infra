@@ -1,0 +1,9 @@
+ingress:
+  enabled: true
+  https: true
+  host: s3.pnap.bud-demo.com
+
+buckets:
+  bud-models-registry:
+    quota:
+      size: 256Gi

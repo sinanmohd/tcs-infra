@@ -1,0 +1,300 @@
+{{- if $.Values.ingress.enabled }}
+{{- if eq $.Values.ingress.https "internal" }}
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: {{ .Release.Name }}-https-redirect
+spec:
+  redirectScheme:
+    scheme: https
+    permanent: true
+---
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: {{ .Release.Name }}-xforwarded-proto
+spec:
+  # TLS terminates at the ingress, so backends receive plain http internally and
+  # `url.scheme` ends up empty in traces/logs. Force the public scheme so downstream
+  # services (e.g. budgateway analytics) record `https`. All ingress traffic is https
+  # (enforced by the https-redirect middleware above).
+  headers:
+    customRequestHeaders:
+      X-Forwarded-Proto: "https"
+---
+{{- end }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ .Release.Name }}-mcpgateway
+  {{- if eq .Values.ingress.https "internal" }}
+  annotations:
+    kubernetes.io/tls-acme: "true"
+    traefik.ingress.kubernetes.io/router.middlewares: {{ .Release.Namespace }}-{{ .Release.Name }}-https-redirect@kubernetescrd,{{ .Release.Namespace }}-{{ .Release.Name }}-xforwarded-proto@kubernetescrd
+  {{- end }}
+spec:
+  ingressClassName: traefik
+  rules:
+    - host: {{ include "bud.ingress.hosts.mcpgateway" $ }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ .Release.Name }}-mcpgateway
+                port:
+                  number: 4444
+  tls:
+    - hosts:
+        - {{ include "bud.ingress.hosts.mcpgateway" $ }}
+      secretName: {{ .Release.Name }}-mcpgateway-acme-cert
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ .Release.Name }}-bud
+  {{- if eq .Values.ingress.https "internal" }}
+  annotations:
+    kubernetes.io/tls-acme: "true"
+    traefik.ingress.kubernetes.io/router.middlewares: {{ .Release.Namespace }}-{{ .Release.Name }}-https-redirect@kubernetescrd,{{ .Release.Namespace }}-{{ .Release.Name }}-xforwarded-proto@kubernetescrd
+  {{- end }}
+spec:
+  ingressClassName: traefik
+  rules:
+    - host: {{ include "bud.ingress.hosts.budadmin" $ }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ .Release.Name }}-budadmin
+                port:
+                  number: 3000
+    - host: {{ include "bud.ingress.hosts.budcustomer" $ }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ .Release.Name }}-budcustomer
+                port:
+                  number: 3000
+    - host: {{ include "bud.ingress.hosts.budplayground" $ }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ .Release.Name }}-budplayground
+                port:
+                  number: 3000
+    - host: {{ include "bud.ingress.hosts.budapp" $ }}
+      http:
+        paths:
+          - path: /events/descriptors
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ .Release.Name }}-budapp
+                port:
+                  number: 9082
+          - path: /events/shared-connections
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ .Release.Name }}-budapp
+                port:
+                  number: 9082
+          - path: /events/subscriptions
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ .Release.Name }}-budapp
+                port:
+                  number: 9082
+          - path: /events
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ .Release.Name }}-budevent
+                port:
+                  number: 9085
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ .Release.Name }}-budapp
+                port:
+                  number: 9082
+    - host: {{ include "bud.ingress.hosts.budgateway" $ }}
+      http:
+        paths:
+          - path: /v1
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ .Release.Name }}-budgateway
+                port:
+                  number: 3000
+          - path: /a2a
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ .Release.Name }}-budgateway
+                port:
+                  number: 3000
+    - host: {{ include "bud.ingress.hosts.budask" $ }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ .Release.Name }}-askbud
+                port:
+                  number: 3000
+    - host: {{ include "bud.ingress.hosts.budnotify" $ }}
+      http:
+        paths:
+          - path: /
+            pathType: Exact
+            backend:
+              service:
+                name: {{ .Release.Name }}-budnotify
+                port:
+                  number: 3000
+          - path: /ws/socket.io/
+            pathType: Exact
+            backend:
+              service:
+                name: {{ .Release.Name }}-budnotify
+                port:
+                  number: 3000
+  tls:
+    - hosts:
+        - {{ include "bud.ingress.hosts.budcustomer" $ }}
+      secretName: {{ .Release.Name }}-budcustomer-acme-cert
+    - hosts:
+        - {{ include "bud.ingress.hosts.budadmin" $ }}
+      secretName: {{ .Release.Name }}-budadmin-acme-cert
+    - hosts:
+        - {{ include "bud.ingress.hosts.budplayground" $ }}
+      secretName: {{ .Release.Name }}-budplayground-acme-cert
+    - hosts:
+        - {{ include "bud.ingress.hosts.budapp" $ }}
+      secretName: {{ .Release.Name }}-budapp-acme-cert
+    - hosts:
+        - {{ include "bud.ingress.hosts.budgateway" $ }}
+      secretName: {{ .Release.Name }}-budgateway-acme-cert
+    - hosts:
+        - {{ include "bud.ingress.hosts.budask" $ }}
+      secretName: {{ .Release.Name }}-budask-acme-cert
+    - hosts:
+        - {{ include "bud.ingress.hosts.budnotify" $ }}
+      secretName: {{ .Release.Name }}-budnotify-acme-cert
+---
+{{- if .Values.onyx.enabled }}
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: {{ .Release.Name }}-onyx-strip-api
+spec:
+  stripPrefix:
+    prefixes:
+      - /api
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ .Release.Name }}-onyx
+  annotations:
+    {{- if eq .Values.ingress.https "internal" }}
+    kubernetes.io/tls-acme: "true"
+    traefik.ingress.kubernetes.io/router.middlewares: {{ .Release.Namespace }}-{{ .Release.Name }}-https-redirect@kubernetescrd,{{ .Release.Namespace }}-{{ .Release.Name }}-onyx-strip-api@kubernetescrd
+    {{- else }}
+    traefik.ingress.kubernetes.io/router.middlewares: {{ .Release.Namespace }}-{{ .Release.Name }}-onyx-strip-api@kubernetescrd
+    {{- end }}
+spec:
+  ingressClassName: traefik
+  rules:
+    - host: {{ include "bud.ingress.hosts.onyx" $ }}
+      http:
+        paths:
+          - path: /api
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ .Release.Name }}-onyx-api-service
+                port:
+                  number: 8080
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ .Release.Name }}-onyx-webserver
+                port:
+                  number: 3000
+  tls:
+    - hosts:
+        - {{ include "bud.ingress.hosts.onyx" $ }}
+      secretName: {{ .Release.Name }}-onyx-acme-cert
+{{- end }}
+---
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: {{ .Release.Name }}-novu-cors
+spec:
+  headers:
+    accessControlAllowMethods:
+      - "*"
+    accessControlAllowHeaders:
+      - "*"
+    accessControlAllowOriginList:
+      - "*"
+    accessControlMaxAge: 100
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ .Release.Name }}-novu
+  annotations:
+    {{- if eq .Values.ingress.https "internal" }}
+    kubernetes.io/tls-acme: "true"
+    {{- end }}
+    traefik.ingress.kubernetes.io/router.middlewares: {{ if eq .Values.ingress.https "internal" }}{{ .Release.Namespace }}-{{ .Release.Name }}-https-redirect@kubernetescrd,{{ end }}{{ .Release.Namespace }}-{{ .Release.Name }}-novu-cors@kubernetescrd
+spec:
+  ingressClassName: traefik
+  rules:
+    - host: {{ include "bud.ingress.hosts.novuapi" $ }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ .Release.Name }}-api
+                port:
+                  number: 3000
+    - host: {{ include "bud.ingress.hosts.novuws" $ }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ .Release.Name }}-ws
+                port:
+                  number: 3002
+  tls:
+    - hosts:
+        - {{ include "bud.ingress.hosts.novuapi" $ }}
+      secretName: {{ .Release.Name }}-novuapi-acme-cert
+    - hosts:
+        - {{ include "bud.ingress.hosts.novuws" $ }}
+      secretName: {{ .Release.Name }}-novuws-acme-cert
+{{ end }}

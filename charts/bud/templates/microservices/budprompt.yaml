@@ -1,0 +1,186 @@
+{{- if (default .Values.microservices.budprompt.enabled false) }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name}}-budprompt
+  annotations:
+    {{- range $key, $value := .Values.deploymentAnnotations }}
+    {{ $key }}: {{ $value | quote }}
+    {{- end }}
+spec:
+  {{- if not (and .Values.microservices.budprompt.autoscaling .Values.microservices.budprompt.autoscaling.enabled) }}
+  replicas: 1
+  {{- end }}
+  selector:
+    matchLabels:
+      app: {{ .Release.Name}}-budprompt
+  template:
+    metadata:
+      labels:
+        app: {{ .Release.Name}}-budprompt
+      annotations:
+        dapr.io/enabled: "true"
+        dapr.io/app-id: {{ .Values.microservices.budprompt.daprid }}
+        dapr.io/app-port: "3015"
+        # Sidecar attaches dapr-api-token on inbound calls (budevent's callback auth); mirrors budapp.
+        dapr.io/app-token-secret: "{{ .Release.Name }}-app-api-token"
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- $nodeSelector := include "bud.nodeSelector" (dict "service" .Values.microservices.budprompt "global" .Values.global "context" $) }}
+      {{- if $nodeSelector }}
+      nodeSelector:
+        {{- $nodeSelector | nindent 8 }}
+      {{- end }}
+      {{- $affinity := include "bud.affinity" (dict "service" .Values.microservices.budprompt "global" .Values.global "context" $) }}
+      {{- if $affinity }}
+      affinity:
+        {{- $affinity | nindent 8 }}
+      {{- end }}
+      containers:
+      - name: {{ .Release.Name}}-budprompt
+        image: {{ .Values.microservices.budprompt.image }}
+        imagePullPolicy: {{ .Values.imagePullPolicy }}
+        # One uvicorn worker per ~0.5 CPU (asyncio = 1 core/worker); keep uvicornWorkers ~= 2x cpu-limit.
+        command:
+          # Keep the image ENTRYPOINT in front: it mints MCP_FOUNDRY_API_KEY, then exec's "$@".
+          - /usr/bin/entrypoint_mcpgateway_api_token.sh
+          - sh
+          - -c
+          # Migrations run on the migration host (direct/session conn) — alembic's create_db probe can't route through the txn pooler; uvicorn keeps the container PSQL_HOST (pooler).
+          - PSQL_HOST={{ .Values.microservices.budprompt.migrationPsqlHost | default $.Values.externalServices.postgresql.host }} alembic -c ./alembic.ini upgrade head && uvicorn budprompt.main:app --host 0.0.0.0 --port 3015 --workers {{ .Values.microservices.budprompt.uvicornWorkers | default 4 }}
+        ports:
+        - containerPort: 3015
+        env:
+          # - name: BUD_GATEWAY_BASE_URL
+            # value: {{ include "bud.ingress.url.budgateway" $ }}
+          - name: BUD_GATEWAY_EXTERNAL_URL
+            value: '{{ include "bud.ingress.url.budgateway" $ }}'
+          - name: PSQL_HOST
+            value: {{ default $.Values.externalServices.postgresql.host $.Values.microservices.budprompt.psqlHost | quote }}
+          - name: PSQL_PORT
+            value: {{ $.Values.externalServices.postgresql.port | quote }}
+          - name: PSQL_USER
+            value: {{ $.Values.externalServices.postgresql.databases.budprompt.username | quote }}
+          - name: PSQL_PASSWORD
+            value: {{ $.Values.externalServices.postgresql.databases.budprompt.password | quote }}
+          - name: PSQL_DB_NAME
+            value: {{ $.Values.externalServices.postgresql.databases.budprompt.name | quote }}
+          - name: MCP_FOUNDRY_BASE_URL
+            value: http://{{ .Release.Name }}-mcpgateway:4444
+          - name: CODE_INTERPRETER_BASE_URL
+            value: http://{{ .Release.Name }}-budcodeinterpreter:3006
+          - name: ENTRYPOINT_MCPGATEWAY_EMAIL
+            value: {{ .Values.microservices.mcpgateway.env.PLATFORM_ADMIN_EMAIL }}
+          - name: ENTRYPOINT_MCPGATEWAY_PASSWORD
+            value: {{ .Values.microservices.mcpgateway.env.PLATFORM_ADMIN_PASSWORD }}
+          - name: REDIS_HOST
+            value: {{ $.Values.externalServices.valkey.host | quote }}
+          - name: REDIS_PORT
+            value: {{ $.Values.externalServices.valkey.port | quote }}
+          - name: REDIS_DB_INDEX
+            value: {{ $.Values.externalServices.valkey.databases.budprompt | quote }}
+          - name: REDIS_PASSWORD
+            value: {{ $.Values.externalServices.valkey.password | quote }}
+        {{- $root := . }}
+        {{- range $key, $value := .Values.microservices.budprompt.env }}
+          - name: {{ $key }}
+            value: {{ tpl $value $root | quote }}
+        {{- end }}
+        envFrom:
+          - configMapRef:
+              name: {{ .Release.Name}}-bud-global
+        {{- with .Values.microservices.budprompt.resources }}
+        resources:
+          {{- toYaml . | nindent 10 }}
+        {{- end }}
+        {{- include "bud.healthProbes" (dict "port" 3015 "probes" .Values.microservices.budprompt.probes) | nindent 8 }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Release.Name }}-budprompt
+spec:
+  ports:
+  - port: 3015
+    targetPort: 3015
+  selector:
+    app: {{ .Release.Name }}-budprompt
+  type: ClusterIP
+---
+apiVersion: dapr.io/v2alpha1
+kind: Subscription
+metadata:
+  name: {{ .Release.Name }}-budprompt-pubsub-subscription
+spec:
+  topic: budPromptMessages
+  routes:
+    default: /notifications
+  pubsubname: {{ .Release.Name }}-pubsub
+  deadLetterTopic: poisonMessages
+scopes:
+  - budprompt
+{{- if and .Values.microservices.budprompt.autoscaling .Values.microservices.budprompt.autoscaling.enabled }}
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: {{ .Release.Name }}-budprompt
+  labels:
+    app: {{ .Release.Name }}-budprompt
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: {{ .Release.Name }}-budprompt
+  minReplicas: {{ .Values.microservices.budprompt.autoscaling.minReplicas | default 1 }}
+  maxReplicas: {{ .Values.microservices.budprompt.autoscaling.maxReplicas | default 5 }}
+  metrics:
+    {{- range .Values.microservices.budprompt.autoscaling.podMetrics }}
+    - type: Pods
+      pods:
+        metric:
+          name: {{ .name }}
+        target:
+          type: AverageValue
+          averageValue: {{ .target | quote }}
+    {{- end }}
+    {{- if and .Values.microservices.budprompt.autoscaling.prometheusMetrics .Values.microservices.budprompt.autoscaling.prometheusMetrics.enabled }}
+    - type: Pods
+      pods:
+        metric:
+          name: {{ .Values.microservices.budprompt.autoscaling.prometheusMetrics.metricName | default "budprompt_inflight_requests" }}
+        target:
+          type: AverageValue
+          averageValue: {{ .Values.microservices.budprompt.autoscaling.prometheusMetrics.targetValue | default "20" | quote }}
+    {{- end }}
+    {{- if .Values.microservices.budprompt.autoscaling.targetCPUUtilizationPercentage }}
+    - type: ContainerResource
+      containerResource:
+        name: cpu
+        container: {{ .Release.Name }}-budprompt
+        target:
+          type: Utilization
+          averageUtilization: {{ .Values.microservices.budprompt.autoscaling.targetCPUUtilizationPercentage }}
+    {{- end }}
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: {{ .Values.microservices.budprompt.autoscaling.scaleDownStabilizationSeconds | default 300 }}
+      policies:
+        - type: Percent
+          value: 50
+          periodSeconds: 60
+    scaleUp:
+      stabilizationWindowSeconds: {{ .Values.microservices.budprompt.autoscaling.scaleUpStabilizationSeconds | default 0 }}
+      policies:
+        - type: Percent
+          value: 100
+          periodSeconds: 15
+        - type: Pods
+          value: 2
+          periodSeconds: 15
+      selectPolicy: Max
+{{- end }}
+{{ end }}

@@ -1,0 +1,42 @@
+trust-manager:
+  enabled: true
+
+cert-manager:
+  ingressShim:
+    defaultIssuerName: selfsigned-ca
+
+certificates:
+  selfsigned-ca:
+    isCA: true
+    duration: 87600h # 10 years
+    renewBefore: 720h # 3 days
+    subject:
+      organizations:
+        - selfsigned-ca
+    commonName: selfsigned-ca
+    secretName: selfsigned-ca-root-secret
+    privateKey:
+      algorithm: ECDSA
+      size: 256
+    issuerRef:
+      name: selfsigned
+      kind: ClusterIssuer
+      group: cert-manager.io
+
+issuers:
+  selfsigned:
+    selfSigned: {}
+  selfsigned-ca:
+    ca:
+      secretName: selfsigned-ca-root-secret
+
+bundles:
+  selfsigned-with-default-ca:
+    sources:
+      - useDefaultCAs: true
+      - secret:
+          name: "selfsigned-ca-root-secret"
+          key: "tls.crt"
+    target:
+      configMap:
+        key: "selfsigned-with-default-ca.pem"

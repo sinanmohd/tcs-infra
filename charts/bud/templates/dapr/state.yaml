@@ -1,0 +1,18 @@
+apiVersion: dapr.io/v1alpha1
+kind: Component
+metadata:
+  name: {{ .Release.Name }}-dapr-statestore
+spec:
+  type: state.redis
+  version: v1
+  metadata:
+    - name: redisHost
+      value: {{ .Values.externalServices.valkey.host }}:{{ .Values.externalServices.valkey.port }}
+    - name: redisPassword
+      value: {{ .Values.externalServices.valkey.password | quote }}
+    - name: actorStateStore
+      value: "true"
+    - name: keyPrefix
+      value: none
+    - name: redisDB
+      value: {{ .Values.externalServices.valkey.databases.state_store }}

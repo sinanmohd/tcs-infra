@@ -1,0 +1,4 @@
+users:
+  bud:
+    password: "bud"
+    spec: {}

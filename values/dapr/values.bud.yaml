@@ -1,0 +1,7 @@
+dapr_scheduler:
+  cluster:
+    storageSize: "8Gi"
+    storageClassName: "openebs-lvm"
+dapr_placement:
+  volumeclaims:
+    storageClassName: "openebs-lvm"

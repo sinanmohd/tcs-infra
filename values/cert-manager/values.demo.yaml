@@ -1,0 +1,17 @@
+cert-manager:
+  ingressShim:
+    defaultIssuerName: letsencrypt-dns01
+
+issuers:
+  letsencrypt-dns01:
+    acme:
+      profile: tlsserver
+      server: https://acme-v02.api.letsencrypt.org/directory
+      privateKeySecretRef:
+        name: letsencrypt-dns01-account-key
+      solvers:
+        - dns01:
+            cloudflare:
+              apiTokenSecretRef:
+                name: cloudflare-api-token
+                key: api-token

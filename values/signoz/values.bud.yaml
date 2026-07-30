@@ -1,0 +1,11 @@
+ingress:
+  enabled: true
+  host: signoz.bud.studio
+
+signoz:
+  otelCollector:
+    replicaCount: 3
+  signoz:
+    env:
+      signoz_global_external__url: https://signoz.bud.studio
+      signoz_alertmanager_signoz_external__url: https://signoz.bud.studio

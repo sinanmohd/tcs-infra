@@ -1,0 +1,101 @@
+apiVersion: psmdb.percona.com/v1
+kind: PerconaServerMongoDB
+metadata:
+  name: mongodb
+  finalizers:
+    - percona.com/delete-psmdb-pods-in-order
+spec:
+  crVersion: 1.22.0
+  pause: false
+  unmanaged: false
+  enableVolumeExpansion: false
+
+  image: {{ .Values.image | quote }}
+  imagePullPolicy: {{ .Values.imagePullPolicy | quote }}
+
+  {{- if .Values.users }}
+  users:
+    {{- range $key, $value := $.Values.users }}
+    - name: {{ $key }}
+      {{- if $value.db }}
+      db: {{ $value.db }}
+      {{- end }}
+      passwordSecretRef:
+        name: mongodb-users
+        key: {{ $key }}_pass
+      {{- if $value.roles }}
+      roles:
+        {{- range $value.roles }}
+        - name: {{ .name }}
+          db: {{ .db }}
+        {{- end }}
+      {{- end }}
+    {{- end }}
+  {{- end }}
+
+  unsafeFlags:
+    backupIfUnhealthy: false
+    mongosSize: false
+    terminationGracePeriod: false
+    tls: false
+    {{- if le $.Values.replsetSize 1.0 }}
+    replsetSize: true
+    {{- end }}
+
+  multiCluster:
+    enabled: false
+  secrets:
+    users: psmdb-db-secrets-auto
+  updateStrategy: SmartUpdate
+
+  replsets:
+  - name: rs0
+    size: {{ $.Values.replsetSize }}
+    affinity:
+      advanced:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - podAffinityTerm:
+                topologyKey: kubernetes.io/hostname
+                labelSelector:
+                  matchLabels:
+                    app.kubernetes.io/component: mongod
+                    app.kubernetes.io/replset: rs0
+              weight: 100
+    podDisruptionBudget:
+      maxUnavailable: 1
+    resources:
+      requests:
+        memory: 512Mi
+    volumeSpec:
+      persistentVolumeClaim:
+        resources:
+          requests:
+            storage: {{ .Values.storage.size | quote }}
+        {{- with $.Values.storage.className }}
+        storageClassName: {{ . | quote }}
+        {{- end }}
+    expose:
+      enabled: false
+    hidden:
+      enabled: false
+      size: 2
+    nonvoting:
+      enabled: false
+      size: 3
+    arbiter:
+      enabled: false
+      size: 1
+
+  upgradeOptions:
+    apply: Never
+  pmm:
+    enabled: false
+    image: "percona/pmm-client:3.6.0"
+  sharding:
+    enabled: false
+  backup:
+    enabled: false
+    image: "percona/percona-backup-mongodb:2.12.0"
+  logcollector:
+    enabled: false

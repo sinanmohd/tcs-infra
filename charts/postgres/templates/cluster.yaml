@@ -1,0 +1,32 @@
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: postgres
+spec:
+  instances: {{ .Values.instances }}
+  imageName: ghcr.io/cloudnative-pg/postgresql:17.9
+  storage:
+    {{- if .Values.storageClass }}
+    storageClass: {{ .Values.storageClass | quote }}
+    {{- end }}
+    size: {{ .Values.size | required "A valid size is required" | quote }}
+  {{- if $.Values.users }}
+  managed:
+    roles:
+    {{- range $user, $value := .Values.users }}
+    - name: {{ $user }}
+      ensure: present
+      connectionLimit: -1
+      inherit: true
+      login: true
+      superuser: false
+      passwordSecret:
+        name: "cnpg-user-{{ $user }}"
+      {{- if $value.inRoles }}
+      inRoles:
+        {{- range $value.inRoles }}
+        - {{ . }}
+        {{- end -}}
+      {{- end -}}
+    {{- end -}}
+  {{- end -}}

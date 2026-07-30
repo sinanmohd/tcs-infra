@@ -1,0 +1,60 @@
+ingress:
+  https: true
+  host: auth.bud.studio
+
+# Dev/prod-apps realm SMTP (SMTP2GO). Non-secret fields here; user/password come from
+# secrets.bud.yaml. Powers budapp's bundled-Keycloak set-password / reset emails.
+realms:
+  keycloak-bud-keycloak-realm:
+    clients:
+      budadmin-web:
+        attributes:
+          post.logout.redirect.uris: https://admin.dev.bud.studio##https://admin.ditto.bud.studio##https://admin.sinan.bud.studio##https://admin.jithin.bud.studio##http://localhost:3000
+        redirectUris:
+          - https://app.dev.bud.studio/auth/redirect/callback
+          - https://app.ditto.bud.studio/auth/redirect/callback
+          - https://app.sinan.bud.studio/auth/redirect/callback
+          - https://app.jithin.bud.studio/auth/redirect/callback
+        webOrigins:
+          - +
+          - http://localhost:3000
+      budcustomer-web:
+        attributes:
+          post.logout.redirect.uris: https://admin.dev.bud.studio##https://customer.dev.bud.studio##https://playground.dev.bud.studio##https://admin.ditto.bud.studio##https://customer.ditto.bud.studio##https://playground.ditto.bud.studio##https://admin.sinan.bud.studio##https://customer.sinan.bud.studio##https://playground.sinan.bud.studio##https://admin.jithin.bud.studio##https://customer.jithin.bud.studio##https://playground.jithin.bud.studio
+        redirectUris:
+          - https://app.dev.bud.studio/auth/redirect/callback
+          - https://app.ditto.bud.studio/auth/redirect/callback
+          - https://app.sinan.bud.studio/auth/redirect/callback
+          - https://app.jithin.bud.studio/auth/redirect/callback
+        webOrigins:
+          - +
+      budplayground-web:
+        attributes:
+          post.logout.redirect.uris: https://playground.dev.bud.studio##https://playground.ditto.bud.studio##https://playground.sinan.bud.studio##https://playground.jithin.bud.studio##http://localhost:3001
+        redirectUris:
+          - https://app.dev.bud.studio/auth/redirect/callback
+          - https://app.ditto.bud.studio/auth/redirect/callback
+          - https://app.sinan.bud.studio/auth/redirect/callback
+          - https://app.jithin.bud.studio/auth/redirect/callback
+        webOrigins:
+          - +
+          - http://localhost:3001
+      mcp-gateway:
+        attributes:
+          post.logout.redirect.uris: https://admin.dev.bud.studio##https://customer.dev.bud.studio##https://playground.dev.bud.studio##https://admin.ditto.bud.studio##https://customer.ditto.bud.studio##https://playground.ditto.bud.studio##https://admin.sinan.bud.studio##https://customer.sinan.bud.studio##https://playground.sinan.bud.studio##https://admin.jithin.bud.studio##https://customer.jithin.bud.studio##https://playground.jithin.bud.studio
+        redirectUris:
+          - https://app.dev.bud.studio/auth/redirect/callback
+          - https://app.ditto.bud.studio/auth/redirect/callback
+          - https://app.sinan.bud.studio/auth/redirect/callback
+          - https://app.jithin.bud.studio/auth/redirect/callback
+        webOrigins:
+          - +
+    spec:
+      smtpServer:
+        host: "mail.smtp2go.com"
+        port: "2525"
+        from: "no-reply@bud-demo.com" # bud-demo.com is the SMTP2GO-verified sender domain
+        fromDisplayName: "Bud"
+        ssl: "false"
+        starttls: "true"
+        auth: "true"

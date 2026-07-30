@@ -1,0 +1,6 @@
+dependencies:
+- name: signoz
+  repository: https://charts.signoz.io
+  version: 0.133.0
+digest: sha256:35ddbe095f1a81e79fde6d95cf7cb405c9f9d35125386940aa702f4043cc24e0
+generated: "2026-07-18T12:59:02.944853336+05:30"

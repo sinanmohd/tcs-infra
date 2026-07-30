@@ -1,0 +1,195 @@
+{{- if (default .Values.microservices.budmodel.enabled false) }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-budmodel
+  annotations:
+    {{- range $key, $value := .Values.deploymentAnnotations }}
+    {{ $key }}: {{ $value | quote }}
+    {{- end }}
+spec:
+  {{- if not (and .Values.microservices.budmodel.autoscaling .Values.microservices.budmodel.autoscaling.enabled) }}
+  replicas: 1
+  {{- end }}
+  selector:
+    matchLabels:
+      app: {{ .Release.Name }}-budmodel
+  template:
+    metadata:
+      labels:
+        app: {{ .Release.Name }}-budmodel
+      annotations:
+        dapr.io/enabled: "true"
+        dapr.io/app-id: {{ .Values.microservices.budmodel.daprid }}
+        dapr.io/app-port: "3004"
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- $nodeSelector := include "bud.nodeSelector" (dict "service" .Values.microservices.budmodel "global" .Values.global "context" $) }}
+      {{- if $nodeSelector }}
+      nodeSelector:
+        {{- $nodeSelector | nindent 8 }}
+      {{- end }}
+      {{- $affinity := include "bud.affinity" (dict "service" .Values.microservices.budmodel "global" .Values.global "context" $) }}
+      {{- if $affinity }}
+      affinity:
+        {{- $affinity | nindent 8 }}
+      {{- end }}
+      containers:
+      - name: {{ .Release.Name }}-budmodel
+        image: {{ .Values.microservices.budmodel.image }}
+        imagePullPolicy: {{ .Values.imagePullPolicy }}
+        command: ["sh", "-c", "apt install clamav clamav-daemon -y && freshclam && sed -i 's|^LocalSocket .*|LocalSocket /tmp/clamd.ctl|' /etc/clamav/clamd.conf && nohup clamd -c /etc/clamav/clamd.conf && nohup aria2c --enable-rpc --rpc-listen-all --rpc-listen-port 6800 --dir /data/models-registry --max-concurrent-downloads 5 > aria2.log 2>&1 & sleep 2 && alembic -c ./alembic.ini upgrade head && uvicorn budmodel.main:app --host 0.0.0.0 --port 3004"]
+        ports:
+        - containerPort: 3004
+        env:
+          # postgresql
+          - name: PSQL_HOST
+            value: {{ $.Values.externalServices.postgresql.host | quote }}
+          - name: PSQL_PORT
+            value: {{ $.Values.externalServices.postgresql.port | quote }}
+          - name: PSQL_USER
+            value: {{ $.Values.externalServices.postgresql.databases.budmodel.username | quote }}
+          - name: PSQL_PASSWORD
+            value: {{ $.Values.externalServices.postgresql.databases.budmodel.password | quote }}
+          - name: PSQL_DB_NAME
+            value: {{ $.Values.externalServices.postgresql.databases.budmodel.name | quote }}
+          # s3
+          - name: MINIO_ENDPOINT
+            value: {{ $.Values.externalServices.s3.endpoint | quote }}
+          - name: MINIO_ACCESS_KEY
+            value: {{ $.Values.externalServices.s3.auth.accessKey | quote }}
+          - name: MINIO_SECRET_KEY
+            value: {{ $.Values.externalServices.s3.auth.secretKey | quote }}
+          - name: MINIO_BUCKET
+            value: {{ $.Values.externalServices.s3.buckets.modelRegistry | quote }}
+          - name: MINIO_MODEL_BUCKET
+            value: {{ $.Values.externalServices.s3.buckets.modelInfo | quote }}
+          - name: MINIO_SECURE
+            value: {{ $.Values.externalServices.s3.secure | default false | quote }}
+          # ---- Pre-flight capacity check ----
+          # All vars below are emitted unconditionally so the budmodel process
+          # always sees an explicit value. Behavior is gated by
+          # MODEL_PREFLIGHT_ENABLED (default "true").
+          {{- $pf := .Values.microservices.budmodel.preflight | default dict }}
+          - name: MODEL_PREFLIGHT_ENABLED
+            value: {{ ($pf.enabled | default false) | quote }}
+          - name: MODEL_REGISTRY_MAX_SIZE
+            # Uses the explicit preflight.registryMaxSize (500 GiB chart
+            # default to preserve the pre-consolidation effective cap), or
+            # auto-derives from the local-cache PVC size via the
+            # bud.gibibytes helper when registryMaxSize is set to "".
+            # printf %d after `int` cast avoids Helm rendering large integers
+            # in scientific notation (e.g. 5368709120 → "5.36870912e+09"),
+            # which Pydantic refuses to parse as int.
+            {{- $pvcGiB := include "bud.gibibytes" $.Values.storage.budmodelRegistry.size }}
+            value: {{ printf "%d" (int ($pf.registryMaxSize | default $pvcGiB)) | quote }}
+          - name: MODEL_REGISTRY_CAPACITY_PROVIDER
+            value: {{ ($pf.capacityProvider | default "auto") | quote }}
+          - name: PROMETHEUS_URL
+            {{- if $pf.prometheusUrl }}
+            value: {{ tpl $pf.prometheusUrl $ | quote }}
+            {{- else }}
+            value: "http://{{ .Release.Name }}-prometheus-server.{{ .Release.Namespace }}.svc:9090"
+            {{- end }}
+          - name: MODEL_REGISTRY_PVC_NAME
+            value: {{ (($pf.registryPvc | default dict).name | default "") | quote }}
+          - name: MODEL_REGISTRY_PVC_NAMESPACE
+            value: {{ (($pf.registryPvc | default dict).namespace | default "") | quote }}
+          - name: MODEL_REGISTRY_S3_METRICS_URL
+            value: {{ (($pf.s3Metrics | default dict).url | default "") | quote }}
+          - name: MODEL_REGISTRY_S3_METRICS_TOKEN
+            {{- $tokRef := (($pf.s3Metrics | default dict).tokenSecretRef | default dict) }}
+            {{- if $tokRef.name }}
+            valueFrom:
+              secretKeyRef:
+                name: {{ $tokRef.name | quote }}
+                key: {{ $tokRef.key | quote }}
+            {{- else }}
+            value: ""
+            {{- end }}
+          - name: MODEL_PREFLIGHT_HEADROOM_PCT
+            # %v keeps a small float in decimal form (0.1, 0.10) and pass-through for strings
+            value: {{ printf "%v" (($pf.headroom | default dict).pct | default "0.10") | quote }}
+          - name: MODEL_PREFLIGHT_HEADROOM_MIN_BYTES
+            # %d formats large ints in decimal regardless of input type (int or string)
+            value: {{ printf "%d" (int (($pf.headroom | default dict).minBytes | default "268435456")) | quote }}
+          - name: CAPACITY_QUERY_TIMEOUT_SECONDS
+            value: {{ printf "%v" ($pf.capacityQueryTimeoutSeconds | default "3.0") | quote }}
+          - name: MODEL_PREFLIGHT_STRICT_UNKNOWN
+            value: {{ ($pf.strictUnknown | default false) | quote }}
+          - name: RESERVATION_MAX_AGE_HOURS
+            value: {{ printf "%d" (int (($pf.reservation | default dict).maxAgeHours | default 24)) | quote }}
+          - name: RESERVATION_PURGE_AGE_DAYS
+            value: {{ printf "%d" (int (($pf.reservation | default dict).purgeAgeDays | default 7)) | quote }}
+        {{ $root := . }}
+        {{- range $key, $value := .Values.microservices.budmodel.env }}
+          - name: {{ $key }}
+            value: {{ tpl $value $root | quote }}
+        {{- end }}
+        envFrom:
+          - configMapRef:
+              name: {{ .Release.Name}}-bud-global
+        {{- with .Values.microservices.budmodel.resources }}
+        resources:
+          {{- toYaml . | nindent 10 }}
+        {{- end }}
+        {{- include "bud.healthProbes" (dict "port" 3004 "probes" .Values.microservices.budmodel.probes) | nindent 8 }}
+        # firejail (used by the model security scan) needs CAP_SYS_ADMIN
+        # to set up its private mount namespace and mount tmpfs on
+        # /run/firejail. Without this the scan exits 1 at sandbox init with
+        # "Error mounting /run/firejail/dbus: Operation not permitted".
+        # SYS_PTRACE is needed for firejail's seccomp filter installation,
+        # SYS_RESOURCE for rlimit adjustments inside the sandbox.
+        securityContext:
+          capabilities:
+            add:
+            - SYS_ADMIN
+            - SYS_PTRACE
+            - SYS_RESOURCE
+          # Required so the setuid-root firejail binary can elevate.
+          allowPrivilegeEscalation: true
+        volumeMounts:
+        - name: models-registry
+          mountPath: /data/models-registry
+        - name: add-dir-budmo
+          mountPath: /datadisk/add_model_dir
+      volumes:
+      - name: models-registry
+        persistentVolumeClaim:
+          claimName: {{ .Release.Name }}-bud-models-registry
+      - name: add-dir-budmo
+        persistentVolumeClaim:
+          claimName: {{ .Release.Name }}-bud-add-dir-budmo
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Release.Name }}-budmodel
+spec:
+  ports:
+  - port: 3004
+    targetPort: 3004
+  selector:
+    app: {{ .Release.Name }}-budmodel
+  type: ClusterIP
+---
+apiVersion: dapr.io/v2alpha1
+kind: Subscription
+metadata:
+  name: {{ .Release.Name }}-budmodel-pubsub-subscription
+spec:
+  topic: budModelMessages
+  routes:
+    default: /notifications
+  pubsubname: {{ .Release.Name }}-pubsub
+  deadLetterTopic: poisonMessages
+scopes:
+  - budmodel
+{{- if and .Values.microservices.budmodel.autoscaling .Values.microservices.budmodel.autoscaling.enabled }}
+---
+{{- include "bud.hpa" (dict "serviceName" "budmodel" "Values" .Values "Release" .Release) }}
+{{- end }}
+{{ end }}

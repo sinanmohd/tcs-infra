@@ -1,0 +1,266 @@
+global:
+    ingress:
+        hosts:
+            root: ditto.bud.studio
+
+# disable keel
+deploymentAnnotations: null
+
+imagePullPolicy: Always
+
+microservices:
+    budmodel:
+        enabled: false
+    buddoc:
+        enabled: false
+        image: dittops/buddoc:nightly
+    budadmin:
+        # respq6: quant wizard auto-name tracks target type; INT2 removed (only
+        # W8A8/W4A16 are vLLM-servable); AdvancedSettings step removed — the config
+        # is auto-derived by budcluster. Built dev-mode OFF (no Evaluations nav item).
+        image: dittops/budadmin:respq11
+    budapp:
+        image: dittops/budapp:resp-quantfix2
+        env:
+            # Reuse the shared bud-dev Keycloak as the common IdP.
+            # Must be the public hostname — the browser-facing /authorize
+            # URL is built from this, and the in-cluster hostname is not
+            # resolvable from the user's browser. Verified hostname via
+            # ``kubectl get keycloak keycloak -n keycloak -o jsonpath='{.spec.hostname.hostname}'``.
+            KEYCLOAK_SERVER_URL: "https://auth.bud.studio/"
+        # BFF redirect-flow client config (see values.dev.yaml). Without this
+        # budapp's /auth/redirect/authorize returns 400 "unknown client host".
+        # clientSecrets live in values.enc.yaml under the same path.
+        redirectFlow:
+            clientsByHostDefault: budadmin
+            clientsByHost:
+                budadmin:
+                    clientId: budadmin-web
+                    hosts:
+                        - '{{ include "bud.ingress.hosts.budadmin" . }}'
+                    allowedReturnUrlOrigins:
+                        - 'https://{{ include "bud.ingress.hosts.budadmin" . }}'
+    budgateway:
+        image: dittops/budgateway:resp
+        resources:
+            limits:
+                cpu: 500m
+                memory: 1024Mi
+            requests:
+                cpu: 250m
+                memory: 512Mi
+    budsim:
+        # resp-regcache2: (1) materialize registry model metadata (config.json)
+        # from S3 on local-cache miss so quantized models resolve engines;
+        # (2) hardware-DB generic-name fallback (raw cpuinfo strings like
+        # "AMD Family 25 Model 97 CPU" -> "AMD EPYC") so deploy sims don't fail
+        # with "Could not determine hardware configuration" on every config.
+        image: dittops/budsim:resp-regcache4
+        env:
+            SKIP_MASTER_NODE_FOR_CPU: "false"
+    budcluster:
+        enabled: true
+        # reconcile10: INT4 quant configs set need_pack (pack-quantized artifacts
+        # vLLM can load) + health-check failures prune the cluster from the
+        # cluster_info statestore blob (budsim's sim candidate list).
+        # reconcile8: model-transfer download preserves the FULL relative model
+        # path (quantized models live at <name>/vllm_quant_model in the S3
+        # registry; the legacy last-component behaviour synced 0 files and the
+        # runtime crashed on a missing model dir).
+        # reconcile7: +tail-ETA countdown, RUNNING-step publish, upload skip-sync guard fix; reconcile4: create_quantization_config FULLY derives a valid vLLM config
+        # from the target bit (INT8->W8A8, INT4->W4A16 weight-only incl. granularity)
+        # instead of trusting the wizard's W4A4/W2A2. Rejects <4-bit up front.
+        image: registry.bud.studio/runtime/budcluster:reconcile13
+        env:
+            # Update OTel endpoint for ditto environment
+            OTEL_COLLECTOR_ENDPOINT: "http://{{ $.Release.Name }}-otel-collector:4318"
+            SKIP_MASTER_NODE_FOR_CPU: "false"
+            # CPU quant image that emits quantization_progress_pct (self-correcting ETA).
+            QUANTIZATION_JOB_IMAGE: registry.bud.studio/runtime/bud-quantization-cpu:0.06
+            # GPU/CUDA quant image, selected when the quantization target device is
+            # cuda/gpu. Built from llmc Dockerfile.cuda. Requires a GPU cluster to
+            # actually run; CPU quant is unaffected.
+            QUANTIZATION_JOB_IMAGE_CUDA: registry.bud.studio/runtime/bud-quantization-cuda:0.02
+    askbud:
+        enabled: false
+        image: dittops/ask-bud:nightly
+    budpipeline:
+        enabled: false
+        image: dittops/budpipeline:nightly
+    budmetrics:
+        image: dittops/budmetrics:nightly
+    budusecases:
+        enabled: false
+        image: dittops/budusecases:nightly
+    mcpgateway:
+        sso:
+            keycloakBaseUrl: "https://auth.bud.studio"
+        resources:
+            limits:
+                cpu: 500m
+                memory: 1024Mi
+            requests:
+                cpu: 250m
+                memory: 512Mi
+    budprompt:
+        image: dittops/budprompt:resp
+        env:
+            CODE_INTERPRETER_BASE_URL: "http://budcodeinterpreter:9088"
+    budplayground:
+        enabled: false
+    budcustomer:
+        enabled: false
+    budeval:
+        enabled: false
+    budcodeinterpreter:
+        enabled: false
+    budsentinel:
+        enabled: false
+    budnotify:
+        image: registry.bud.studio/runtime/budnotify:nightly
+    semanticRouter:
+        enabled: false
+    global:
+        env:
+            LOG_LEVEL: DEBUG
+
+storage:
+    budmodelRegistry:
+        className: "openebs-lvm"
+    budmodelAddDir:
+        className: "openebs-lvm"
+    budevalDataset:
+        className: "openebs-lvm"
+    budappStaticDir:
+        className: "openebs-lvm"
+
+prometheus:
+    server:
+        persistentVolume:
+            storageClass: "openebs-lvm"
+
+# Logical isolation from bud-dev: ditto shares the same shared
+# postgres/kafka/valkey/clickhouse/mongodb/rustfs servers but uses
+# disjoint database names, topic names, valkey DB indices, and S3 buckets.
+externalServices:
+    # Shared bud-dev Keycloak (realm bud-keycloak) is the common IdP. Drives
+    # OIDC_ISSUER/OIDC_ACCOUNT_MANAGEMENT_URL; without it they fall back to
+    # localhost:8080 and the SSO redirect breaks.
+    keycloak:
+        url: "https://auth.bud.studio"
+    s3:
+        # Shared in-cluster object store is SeaweedFS (no rustfs is deployed).
+        # Use the public TLS form so REMOTE clusters (e.g. PNAP) can reach the
+        # model registry for model transfer; the in-cluster ClusterIP
+        # (seaweed-s3.seaweedfs:8333) is unreachable from other clusters.
+        # s3.bud.studio is HTTPS-only (308-redirects HTTP) -> secure: true.
+        endpoint: "s3.bud.studio"
+        secure: true
+        buckets:
+            # bud-models-registry (shared) — the FG9K S3 key has access here and
+            # the models live here. The isolated bud-models-registry-ditto bucket
+            # needs its seaweedfs access-grant + a model copy before it can be used.
+            modelRegistry: "bud-models-registry"
+            modelInfo: "bud-model-info-ditto"
+            novu: "bud-novu-ditto"
+    mongodb:
+        endpoint: "mongodb-rs0.mongodb:27017"
+        # Auth user whose Mongo auth DB == the ditto novu DB. Drives the shared
+        # ditto-bud-global configmap's MONGO_URL (no authSource in the URL, so
+        # username/auth-DB/database must align). User provisioned in mongodb CR.
+        auth:
+            username: "bud_novu_ditto"
+            password: "bud_novu"
+        databases:
+            novu: "bud_novu_ditto"
+    valkey:
+        host: "valkey-master.valkey"
+        port: 6379
+        # bud-dev occupies indices 3-10; ditto uses the disjoint set.
+        databases:
+            config_store: 11
+            state_store: 12
+            novu: 13
+            budgateway: 14
+            mcpgateway: 15
+            budprompt: 0
+            global: 1
+            onyx: 2
+    clickhouse:
+        host: "clickhouse-clickhouse.clickhouse"
+        port: 9000
+        databases:
+            budeval: "bud_eval_ditto"
+            budgateway: "bud_gateway_ditto"
+            budmetrics: "metrics_ditto"
+    kafka:
+        endpoint: "kafka-kafka-brokers.kafka:9092"
+        topics:
+            pubsub: "bud_pubsub_ditto"
+            budgateway: "bud_gateway_ditto"
+    postgresql:
+        host: "pooler-rw.postgres"
+        port: 5432
+        databases:
+            # Reuse bud-dev's keycloak2 DB (shared IdP); ditto-keycloak is disabled below.
+            keycloak:
+                name: "keycloak2"
+            budask:
+                name: "budask_ditto"
+            budapp:
+                name: "budapp_ditto"
+            budcluster:
+                name: "budcluster_ditto"
+            budmetrics:
+                name: "budmetrics_ditto"
+            budmodel:
+                name: "budmodel_ditto"
+            budsim:
+                name: "budsim_ditto"
+            budeval:
+                name: "budeval_ditto"
+            buddoc:
+                name: "buddoc_ditto"
+            budprompt:
+                name: "budprompt_ditto"
+            mcpgateway:
+                name: "mcpgateway_ditto"
+            budpipeline:
+                name: "budpipeline_ditto"
+            onyx:
+                name: "onyx_ditto"
+
+# Disable the embedded Keycloak StatefulSet — ditto reuses bud-dev's bud-keycloak as the common IdP.
+keycloak:
+    enabled: false
+
+novu:
+    api:
+        env:
+            DISABLE_USER_REGISTRATION: false
+            REDIS_DB_INDEX: "13"
+    externalDatabase:
+        host: "mongodb-rs0.mongodb"
+        # Dedicated Mongo user whose auth DB == the ditto DB. The chart builds
+        # the URL with no authSource, so user/authDB/database must all align.
+        # (User provisioned in the shared `mongodb` Percona release / CR.)
+        username: "bud_novu_ditto"
+        password: "bud_novu"
+        database: "bud_novu_ditto"
+    externalRedis:
+        host: "valkey-master.valkey"
+        existingSecret: "{{ $.Release.Name }}-novu-externalredis"
+    externalS3:
+        existingSecret: "{{ $.Release.Name }}-novu-externals3"
+        bucketName: "bud-novu-ditto"
+
+# Disable prometheus-adapter to avoid ClusterRole conflict with bud-dev
+prometheus-adapter:
+    enabled: false
+onyx:
+    enabled: false
+    ingress:
+        hosts:
+            root: ditto.bud.studio
+    global:
+        version: "nightly"

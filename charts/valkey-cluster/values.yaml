@@ -1,0 +1,6 @@
+valkey-operator:
+  enabled: true
+
+# NOTE: use seperate instance for each app, dont use shared valkey instance
+# https://github.com/valkey-io/valkey-operator/blob/main/docs/valkeycluster.md
+instance: {}

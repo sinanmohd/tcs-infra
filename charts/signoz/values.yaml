@@ -1,0 +1,49 @@
+ingress:
+  enabled: false
+  host: example.com
+
+signoz:
+  enabled: true
+  clickhouse:
+    enabled: false
+
+  externalClickhouse:
+    host: clickhouse-clickhouse.clickhouse
+    user: signoz
+    cluster: cluster
+    password: signoz
+    database: signoz_metrics
+    traceDatabase: signoz_traces
+    logDatabase: signoz_logs
+    meterDatabase: signoz_meter
+
+  otelCollector:
+    ports:
+      otlp-http:
+        enabled: false
+      metrics:
+        enabled: false
+      jaeger-thrift:
+        enabled: false
+      jaeger-grpc:
+        enabled: false
+      logsjson:
+        enabled: false
+      logsheroku:
+        enabled: false
+
+  signoz:
+    env:
+      #  TODO: setup email
+      # signoz_emailing_enabled: todo
+      # signoz_emailing_smtp_address: todo
+      # signoz_emailing_smtp_from: todo
+      # signoz_emailing_smtp_auth_username: todo
+      # signoz_emailing_smtp_auth_password: todo
+      signoz_tokenizer_jwt_secret: changeme
+      signoz_sqlstore_provider: postgres
+      signoz_global_external__url: http://example.com
+      signoz_alertmanager_signoz_external__url: http://example.com
+      signoz_sqlstore_postgres_dsn: postgres://signoz:signoz@pooler-rw.postgres:5432/signoz?sslmode=disable
+    persistence:
+      enabled: false

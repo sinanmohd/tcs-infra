@@ -1,0 +1,15 @@
+dependencies:
+- name: novu
+  repository: file://charts/novu
+  version: 0.1.6
+- name: prometheus
+  repository: https://prometheus-community.github.io/helm-charts
+  version: 25.27.0
+- name: prometheus-adapter
+  repository: https://prometheus-community.github.io/helm-charts
+  version: 4.11.0
+- name: common
+  repository: https://charts.bitnami.com/bitnami
+  version: 2.40.0
+digest: sha256:a816f71c946610f5ef58a2bd250c86f4dd6cd046ff0254de35219e2acf7aa1c1
+generated: "2026-05-21T13:17:02.518595765+05:30"

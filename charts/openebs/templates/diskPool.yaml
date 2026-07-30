@@ -1,0 +1,9 @@
+{{- range $name, $value := $.Values.diskPool }}
+apiVersion: "openebs.io/v1beta3"
+kind: DiskPool
+metadata:
+  name: {{ $name | quote }}
+spec:
+  {{- $value | toYaml | nindent 2 }}
+---
+{{- end }}

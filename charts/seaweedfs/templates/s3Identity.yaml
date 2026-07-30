@@ -1,0 +1,36 @@
+{{- range $key, $value := $.Values.identity }}
+apiVersion: seaweed.seaweedfs.com/v1
+kind: S3Identity
+metadata:
+  name: {{ $key | quote }}
+spec:
+  seaweedRef:
+    name: seaweed
+  account:
+    displayName: {{ $key | quote }}
+    {{- with $value.email }}
+    email: {{ . | quote }}
+    {{- end }}
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ printf "s3-secret-%s" $key | quote }}
+type: Opaque
+stringData:
+  accessKey: {{ $value.accessKey | quote }}
+  secretKey: {{ $value.secretKey | quote }}
+---
+apiVersion: seaweed.seaweedfs.com/v1
+kind: S3Credentials
+metadata:
+  name: {{ $key | quote }}
+spec:
+  seaweedRef:
+    name: seaweed
+  identityRef:
+    name: {{ $key | quote }}
+  secretRef:
+    name: {{ printf "s3-secret-%s" $key | quote }}
+---
+{{- end }}
