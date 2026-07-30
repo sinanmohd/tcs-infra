@@ -15,7 +15,7 @@ spec:
             chart: dapr
             targetRevision: "1.17.5"
             valueFiles:
-              - "$values/infra/values/dapr/values.yaml"
+              - "$values/values/dapr/values.yaml"
           - name: kafka
             namespace: kafka
             repoURL: registry.bud.studio/charts
@@ -23,7 +23,7 @@ spec:
             targetRevision: "0.1.0"
             valueFiles:
               - "example.minimal.yaml"
-              - "$values/infra/values/kafka/values.budruntime.yaml"
+              - "$values/values/kafka/values.budruntime.yaml"
           - name: mongodb
             namespace: mongodb
             repoURL: registry.bud.studio/charts
@@ -31,15 +31,15 @@ spec:
             targetRevision: "0.1.0"
             valueFiles:
               - "example.minimal.yaml"
-              - "$values/infra/values/mongodb/values.budruntime.yaml"
+              - "$values/values/mongodb/values.budruntime.yaml"
           - name: cert-manager
             namespace: cert-manager
             repoURL: registry.bud.studio/charts
             chart: cert-manager
             targetRevision: "0.1.1"
             valueFiles:
-              - "$values/infra/values/cert-manager/values.demo.yaml"
-              - "$values/infra/values/cert-manager/secrets.demo.yaml"
+              - "$values/values/cert-manager/values.demo.yaml"
+              - "$values/values/cert-manager/secrets.demo.yaml"
           - name: clickhouse
             namespace: clickhouse
             repoURL: registry.bud.studio/charts
@@ -47,7 +47,7 @@ spec:
             targetRevision: "0.1.0"
             valueFiles:
               - "example.minimal.yaml"
-              - "$values/infra/values/clickhouse/values.budruntime.yaml"
+              - "$values/values/clickhouse/values.budruntime.yaml"
           - name: postgres
             namespace: postgres
             repoURL: registry.bud.studio/charts
@@ -55,8 +55,8 @@ spec:
             targetRevision: "0.1.0"
             valueFiles:
               - "example.minimal.yaml"
-              - "$values/infra/values/postgres/values.budruntime.yaml"
-              - "$values/infra/values/postgres/values.minimal.budruntime.yaml"
+              - "$values/values/postgres/values.budruntime.yaml"
+              - "$values/values/postgres/values.minimal.budruntime.yaml"
           - name: seaweedfs
             namespace: seaweedfs
             repoURL: registry.bud.studio/charts
@@ -64,33 +64,33 @@ spec:
             targetRevision: "0.1.0"
             valueFiles:
               - "example.minimal.yaml"
-              - "$values/infra/values/seaweedfs/values.budruntime.yaml"
-              - "$values/infra/values/seaweedfs/values.tcs.yaml"
+              - "$values/values/seaweedfs/values.budruntime.yaml"
+              - "$values/values/seaweedfs/values.tcs.yaml"
           - name: valkey
             namespace: valkey
             repoURL: registry-1.docker.io/cloudpirates
             chart: valkey
             targetRevision: "0.21.4"
             valueFiles:
-              - "$values/infra/values/valkey/values.yaml"
-              - "$values/infra/values/valkey/values.budruntime.yaml"
+              - "$values/values/valkey/values.yaml"
+              - "$values/values/valkey/values.budruntime.yaml"
           - name: keycloak
             namespace: keycloak
             repoURL: registry.bud.studio/charts
             chart: keycloak
             targetRevision: "0.2.0"
             valueFiles:
-              - "$values/infra/values/keycloak/values.budruntime.yaml"
-              - "$values/infra/values/keycloak/values.tcs.yaml"
-              - "$values/infra/values/keycloak/secrets.demo.yaml"
+              - "$values/values/keycloak/values.budruntime.yaml"
+              - "$values/values/keycloak/values.tcs.yaml"
+              - "$values/values/keycloak/secrets.demo.yaml"
           - name: bud
             namespace: bud
             repoURL: registry.bud.studio/charts
             chart: bud
             targetRevision: "1.1.0"
             valueFiles:
-              - "$values/infra/values/bud/secrets.demo.yaml"
-              - "$values/infra/values/bud/values.tcs.yaml"
+              - "$values/values/bud/secrets.demo.yaml"
+              - "$values/values/bud/values.tcs.yaml"
   template:
     metadata:
       name: "tcs-{{.name}}"
