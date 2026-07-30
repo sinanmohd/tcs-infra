@@ -1,3 +1,4 @@
+volumeGroupName: "vg1"
 diskPool: {}
 
 openebs:

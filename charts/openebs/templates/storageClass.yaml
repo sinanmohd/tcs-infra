@@ -10,7 +10,7 @@ parameters:
   fsType: ext4
   shared: "yes"
   storage: "lvm"
-  volgroup: "vg1"
+  volgroup: {{ $.Values.volumeGroupName | quote }}
 ---
 apiVersion: storage.k8s.io/v1
 kind: StorageClass

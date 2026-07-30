@@ -9,6 +9,13 @@ spec:
   generators:
     - list:
         elements:
+          - name: openebs
+            namespace: openebs
+            repoURL: registry.bud.studio/charts
+            chart: openebs
+            targetRevision: "0.1.1"
+            valueFiles:
+              - "$values/values/argocd/values.tcs.yaml"
           - name: dapr
             namespace: dapr-system
             repoURL: https://dapr.github.io/helm-charts
