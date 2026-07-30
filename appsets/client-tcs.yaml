@@ -1,0 +1,121 @@
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: tcs
+  namespace: argocd
+spec:
+  goTemplate: true
+  goTemplateOptions: ["missingkey=error"]
+  generators:
+    - list:
+        elements:
+          - name: dapr
+            namespace: dapr-system
+            repoURL: https://dapr.github.io/helm-charts
+            chart: dapr
+            targetRevision: "1.17.5"
+            valueFiles:
+              - "$values/infra/values/dapr/values.yaml"
+          - name: kafka
+            namespace: kafka
+            repoURL: registry.bud.studio/charts
+            chart: kafka
+            targetRevision: "0.1.0"
+            valueFiles:
+              - "example.minimal.yaml"
+              - "$values/infra/values/kafka/values.budruntime.yaml"
+          - name: mongodb
+            namespace: mongodb
+            repoURL: registry.bud.studio/charts
+            chart: mongodb
+            targetRevision: "0.1.0"
+            valueFiles:
+              - "example.minimal.yaml"
+              - "$values/infra/values/mongodb/values.budruntime.yaml"
+          - name: cert-manager
+            namespace: cert-manager
+            repoURL: registry.bud.studio/charts
+            chart: cert-manager
+            targetRevision: "0.1.1"
+            valueFiles:
+              - "$values/infra/values/cert-manager/values.demo.yaml"
+              - "$values/infra/values/cert-manager/secrets.demo.yaml"
+          - name: clickhouse
+            namespace: clickhouse
+            repoURL: registry.bud.studio/charts
+            chart: clickhouse
+            targetRevision: "0.1.0"
+            valueFiles:
+              - "example.minimal.yaml"
+              - "$values/infra/values/clickhouse/values.budruntime.yaml"
+          - name: postgres
+            namespace: postgres
+            repoURL: registry.bud.studio/charts
+            chart: postgres
+            targetRevision: "0.1.0"
+            valueFiles:
+              - "example.minimal.yaml"
+              - "$values/infra/values/postgres/values.budruntime.yaml"
+              - "$values/infra/values/postgres/values.minimal.budruntime.yaml"
+          - name: seaweedfs
+            namespace: seaweedfs
+            repoURL: registry.bud.studio/charts
+            chart: seaweedfs
+            targetRevision: "0.1.0"
+            valueFiles:
+              - "example.minimal.yaml"
+              - "$values/infra/values/seaweedfs/values.budruntime.yaml"
+              - "$values/infra/values/seaweedfs/values.tcs.yaml"
+          - name: valkey
+            namespace: valkey
+            repoURL: registry-1.docker.io/cloudpirates
+            chart: valkey
+            targetRevision: "0.21.4"
+            valueFiles:
+              - "$values/infra/values/valkey/values.yaml"
+              - "$values/infra/values/valkey/values.budruntime.yaml"
+          - name: keycloak
+            namespace: keycloak
+            repoURL: registry.bud.studio/charts
+            chart: keycloak
+            targetRevision: "0.2.0"
+            valueFiles:
+              - "$values/infra/values/keycloak/values.budruntime.yaml"
+              - "$values/infra/values/keycloak/values.tcs.yaml"
+              - "$values/infra/values/keycloak/secrets.demo.yaml"
+          - name: bud
+            namespace: bud
+            repoURL: registry.bud.studio/charts
+            chart: bud
+            targetRevision: "1.1.0"
+            valueFiles:
+              - "$values/infra/values/bud/secrets.demo.yaml"
+              - "$values/infra/values/bud/values.tcs.yaml"
+  template:
+    metadata:
+      name: "tcs-{{.name}}"
+    spec:
+      project: tcs
+      destination:
+        server: "https://kubernetes.default.svc"
+        namespace: "{{.namespace}}"
+      syncPolicy:
+        syncOptions:
+          - CreateNamespace=true
+          - ServerSideApply=true
+        automated:
+          enabled: false
+          selfHeal: true
+  templatePatch: |
+    spec:
+      sources:
+        - repoURL: {{ .repoURL | quote }}
+          chart: {{ .chart | quote }}
+          targetRevision: {{ .targetRevision | quote }}
+          helm:
+            releaseName: "{{.name}}"
+            valueFiles:
+              {{- .valueFiles | toYaml | nindent 12  }}
+        - repoURL: "https://github.com/sinanmohd/tcs-infra.git"
+          targetRevision: HEAD
+          ref: values
