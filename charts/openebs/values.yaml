@@ -1,4 +1,5 @@
 volumeGroupName: "vg1"
+defaultProvisoner: false
 diskPool: {}
 
 openebs:

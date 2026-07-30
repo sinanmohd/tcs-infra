@@ -6,6 +6,10 @@ volumeBindingMode: WaitForFirstConsumer
 reclaimPolicy: Delete
 metadata:
   name: openebs-lvm
+  {{- if $.Values.defaultProvisoner }}
+  annotations:
+    storageclass.kubernetes.io/is-default-class: "true"
+  {{- end }}
 parameters:
   fsType: ext4
   shared: "yes"
