@@ -1,0 +1,26 @@
+global:
+  domain: argocd.bud.tcsrss.com
+
+ingress:
+  enabled: true
+  host: argocd.bud.tcsrss.com
+
+repo:
+  enabled: true
+  url: https://github.com/sinanmohd/tcs-infra
+
+argo-cd:
+  configs:
+    cm:
+      url: https://argocd.bud.tcsrss.com
+
+projects:
+  tcs:
+    clusterResourceWhitelist:
+      - group: "*"
+        kind: "*"
+    destinations:
+      - namespace: "*"
+        server: "https://kubernetes.default.svc"
+    sourceRepos:
+      - "*"
