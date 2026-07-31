@@ -9,13 +9,6 @@ spec:
   generators:
     - list:
         elements:
-          - name: openebs
-            namespace: openebs
-            repoURL: registry.bud.studio/charts
-            chart: openebs
-            targetRevision: "0.1.2"
-            valueFiles:
-              - "$values/values/openebs/values.tcs.yaml"
           - name: dapr
             namespace: dapr-system
             repoURL: https://dapr.github.io/helm-charts
@@ -80,6 +73,7 @@ spec:
             targetRevision: "0.21.4"
             valueFiles:
               - "$values/values/valkey/values.yaml"
+              - "$values/values/valkey/values.minimal.yaml"
               - "$values/values/valkey/values.budruntime.yaml"
           - name: keycloak
             namespace: keycloak
@@ -94,7 +88,7 @@ spec:
             namespace: bud
             repoURL: registry.bud.studio/charts
             chart: bud
-            targetRevision: "1.1.0"
+            targetRevision: "1.1.1"
             valueFiles:
               - "$values/values/bud/secrets.demo.yaml"
               - "$values/values/bud/values.tcs.yaml"
