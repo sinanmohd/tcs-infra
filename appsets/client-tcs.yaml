@@ -9,6 +9,13 @@ spec:
   generators:
     - list:
         elements:
+          - name: kyverno
+            namespace: kyverno
+            repoURL: registry.bud.studio/charts
+            chart: kyverno
+            targetRevision: "0.0.1"
+            valueFiles:
+              - "$values/values/kyverno/values.tcs.yaml"
           - name: dapr
             namespace: dapr-system
             repoURL: https://dapr.github.io/helm-charts
@@ -38,7 +45,7 @@ spec:
             chart: cert-manager
             targetRevision: "0.1.1"
             valueFiles:
-              - "$values/values/cert-manager/values.selfsigned-ca.yaml"
+              - "$values/values/cert-manager/values.tcs.yaml"
           - name: clickhouse
             namespace: clickhouse
             repoURL: registry.bud.studio/charts
