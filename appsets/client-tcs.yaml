@@ -38,8 +38,7 @@ spec:
             chart: cert-manager
             targetRevision: "0.1.1"
             valueFiles:
-              - "$values/values/cert-manager/values.demo.yaml"
-              - "$values/values/cert-manager/secrets.demo.yaml"
+              - "$values/values/cert-manager/values.selfsigned-ca.yaml"
           - name: clickhouse
             namespace: clickhouse
             repoURL: registry.bud.studio/charts
