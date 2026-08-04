@@ -48,6 +48,7 @@ spec:
             targetRevision: "0.0.2"
             valueFiles:
               - "$values/values/kyverno/values.inject-ca.yaml"
+              - "$values/values/kyverno/values.budruntime.yaml"
           - name: clickhouse
             namespace: clickhouse
             repoURL: registry.bud.studio/charts
