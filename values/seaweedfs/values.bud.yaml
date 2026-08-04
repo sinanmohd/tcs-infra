@@ -15,8 +15,8 @@ volumeTopology:
     storageClassName: "openebs-lvm"
     rack: "rack1"
     requests:
-      storage: 350Gi
-    replicas: 2
+      storage: 768Gi
+    replicas: 1
     maxVolumeCounts: 150
     minFreeSpacePercent: 10
   bud-hetzner-ax52-1:
@@ -24,9 +24,9 @@ volumeTopology:
     nodeSelector:
       kubernetes.io/hostname: "bud-hetzner-ax52-1"
     storageClassName: "openebs-lvm"
-    replicas: 2
+    replicas: 1
     requests:
-      storage: 350Gi
+      storage: 768Gi
     rack: "rack1"
     maxVolumeCounts: 150
     minFreeSpacePercent: 10
@@ -35,9 +35,9 @@ volumeTopology:
     storageClassName: "openebs-lvm"
     nodeSelector:
       kubernetes.io/hostname: "bud-hetzner-ax52-2"
-    replicas: 2
+    replicas: 1
     requests:
-      storage: 350Gi
+      storage: 768Gi
     rack: "rack1"
     maxVolumeCounts: 150
     minFreeSpacePercent: 10
@@ -71,7 +71,7 @@ buckets:
     objectLock: false
     anonymousRead: false
     quota:
-      size: 512Gi
+      size: 768Gi
       enforce: true
   opentofu:
     reclaimPolicy: Retain

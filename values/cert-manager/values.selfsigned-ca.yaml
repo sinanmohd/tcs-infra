@@ -14,7 +14,7 @@ certificates:
       organizations:
         - selfsigned-ca
     commonName: selfsigned-ca
-    secretName: selfsigned-ca-root-secret
+    secretName: selfsigned-ca-root
     privateKey:
       algorithm: ECDSA
       size: 256
@@ -28,15 +28,19 @@ issuers:
     selfSigned: {}
   selfsigned-ca:
     ca:
-      secretName: selfsigned-ca-root-secret
+      secretName: selfsigned-ca-root
 
 bundles:
-  selfsigned-with-default-ca:
+  ca-pemstore:
     sources:
       - useDefaultCAs: true
       - secret:
-          name: "selfsigned-ca-root-secret"
+          name: "selfsigned-ca-root"
           key: "tls.crt"
     target:
       configMap:
-        key: "selfsigned-with-default-ca.pem"
+        key: "cafebabe-ca.pem"
+      additionalFormats:
+        pkcs12:
+          key: "cafebabe-ca.p12"
+          password: ""

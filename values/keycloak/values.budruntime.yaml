@@ -7,6 +7,17 @@ image: registry.bud.studio/runtime/keycloak-budtheme:0.2.2
 imagePullSecrets:
   - name: registry.bud.studio
 
+affinity:
+  nodeAffinity:
+    preferredDuringSchedulingIgnoredDuringExecution:
+      - weight: 75
+        preference:
+          matchExpressions:
+            - key: bud.studio/control-plane
+              operator: In
+              values:
+                - "true"
+
 realms:
   keycloak-bud-keycloak-realm:
     clients:

@@ -544,9 +544,7 @@ argo-cd:
 clusters:
   pnap:
     server: "https://100.64.0.16:6443"
-  intel-nex-labs:
-    server: "https://100.64.0.17:16443"
-  ltim:
+  ltm:
     server: "https://100.64.0.8:6443"
 
 projects:
@@ -559,16 +557,7 @@ projects:
         server: "https://100.64.0.16:6443"
     sourceRepos:
       - "*"
-  intel-nex-labs:
-    clusterResourceWhitelist:
-      - group: "*"
-        kind: "*"
-    destinations:
-      - namespace: "*"
-        server: "https://100.64.0.17:16443"
-    sourceRepos:
-      - "*"
-  ltim:
+  ltm:
     clusterResourceWhitelist:
       - group: "*"
         kind: "*"

@@ -45,9 +45,52 @@ poolers:
         affinity:
           podAntiAffinity:
             preferredDuringSchedulingIgnoredDuringExecution:
-              - podAffinityTerm:
+              - weight: 100
+                podAffinityTerm:
                   topologyKey: kubernetes.io/hostname
                   labelSelector:
                     matchLabels:
                       app: pooler-txn
-                weight: 100
+          nodeAffinity:
+            preferredDuringSchedulingIgnoredDuringExecution:
+              - weight: 75
+                preference:
+                  matchExpressions:
+                    - key: bud.studio/control-plane
+                      operator: In
+                      values:
+                        - "true"
+  pooler-rw:
+    template:
+      spec:
+        affinity:
+          nodeAffinity:
+            preferredDuringSchedulingIgnoredDuringExecution:
+              - weight: 75
+                preference:
+                  matchExpressions:
+                    - key: bud.studio/control-plane
+                      operator: In
+                      values:
+                        - "true"
+cloudnative-pg:
+  affinity:
+    nodeAffinity:
+      preferredDuringSchedulingIgnoredDuringExecution:
+        - weight: 75
+          preference:
+            matchExpressions:
+              - key: bud.studio/control-plane
+                operator: In
+                values:
+                  - "true"
+affinity:
+  nodeAffinity:
+    preferredDuringSchedulingIgnoredDuringExecution:
+      - weight: 75
+        preference:
+          matchExpressions:
+            - key: bud.studio/control-plane
+              operator: In
+              values:
+                - "true"
