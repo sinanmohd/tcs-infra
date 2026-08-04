@@ -20,6 +20,10 @@ clusterPolicies:
             - list: request.object.spec.containers
               patchStrategicMerge:
                 spec:
+                  volumes:
+                    - name: ca-pemstore
+                      configMap:
+                        name: ca-pemstore
                   containers:
                     - name: "{{ element.name }}"
                       volumeMounts:
@@ -57,48 +61,47 @@ clusterPolicies:
                         #   value: "/etc/ssl/certs/cafebabe-ca.pem"
                         # - name: CLOUDSDK_CORE_CUSTOM_CA_CERTS_FILE
                         #   value: "/etc/ssl/certs/cafebabe-ca.pem"
-            # FIXME: fails on bud chart sync, deployments are not created
-            # - list: request.object.spec.initContainers || '[]'
-            #   patchStrategicMerge:
-            #     spec:
-            #       containers:
-            #         - name: "{{ element.name }}"
-            #           volumeMounts:
-            #             - name: ca-pemstore
-            #               mountPath: /etc/ssl/certs/cafebabe-ca.pem
-            #               subPath: cafebabe-ca.pem
-            #               readOnly: true
-            #             # - name: ca-pemstore
-            #             #   mountPath: /etc/ssl/cafebabe-ca.p12
-            #             #   subPath: cafebabe-ca.p12
-            #             #   readOnly: true
-            #           env:
-            #             # defult shared env
-            #             - name: SSL_CERT_FILE
-            #               value: "/etc/ssl/certs/cafebabe-ca.pem"
-            #             # nodejs
-            #             - name: NODE_EXTRA_CA_CERTS
-            #               value: "/etc/ssl/certs/cafebabe-ca.pem"
-            #             # python
-            #             - name: REQUESTS_CA_BUNDLE
-            #               value: "/etc/ssl/certs/cafebabe-ca.pem"
-            #             - name: PIP_CERT
-            #               value: "/etc/ssl/certs/cafebabe-ca.pem"
-            #             # curl
-            #             - name: CURL_CA_BUNDLE
-            #               value: "/etc/ssl/certs/cafebabe-ca.pem"
-            #             # git
-            #             - name: GIT_SSL_CAINFO
-            #               value: "/etc/ssl/certs/cafebabe-ca.pem"
-            #             # let's not override JAVA_TOOL_OPTIONS
-            #             # - name: JAVA_TOOL_OPTIONS
-            #             #   value: "-Djavax.net.ssl.trustStore=/etc/ssl/cafebabe-ca.p12 -Djavax.net.ssl.trustStorePassword=changeit -Djavax.net.ssl.trustStoreType=PKCS12"
-            #             # cloud sdk, not overridden (why? we're using aws endpoint!)
-            #             # - name: AWS_CA_BUNDLE
-            #             #   value: "/etc/ssl/certs/cafebabe-ca.pem"
-            #             # - name: CLOUDSDK_CORE_CUSTOM_CA_CERTS_FILE
-            #             #   value: "/etc/ssl/certs/cafebabe-ca.pem"
-            #       volumes:
-            #         - name: ca-pemstore
-            #           configMap:
-            #             name: ca-pemstore
+            - list: request.object.spec.initContainers || '[]'
+              patchStrategicMerge:
+                spec:
+                  volumes:
+                    - name: ca-pemstore
+                      configMap:
+                        name: ca-pemstore
+                  containers:
+                    - name: "{{ element.name }}"
+                      volumeMounts:
+                        - name: ca-pemstore
+                          mountPath: /etc/ssl/certs/cafebabe-ca.pem
+                          subPath: cafebabe-ca.pem
+                          readOnly: true
+                        # - name: ca-pemstore
+                        #   mountPath: /etc/ssl/cafebabe-ca.p12
+                        #   subPath: cafebabe-ca.p12
+                        #   readOnly: true
+                      env:
+                        # defult shared env
+                        - name: SSL_CERT_FILE
+                          value: "/etc/ssl/certs/cafebabe-ca.pem"
+                        # nodejs
+                        - name: NODE_EXTRA_CA_CERTS
+                          value: "/etc/ssl/certs/cafebabe-ca.pem"
+                        # python
+                        - name: REQUESTS_CA_BUNDLE
+                          value: "/etc/ssl/certs/cafebabe-ca.pem"
+                        - name: PIP_CERT
+                          value: "/etc/ssl/certs/cafebabe-ca.pem"
+                        # curl
+                        - name: CURL_CA_BUNDLE
+                          value: "/etc/ssl/certs/cafebabe-ca.pem"
+                        # git
+                        - name: GIT_SSL_CAINFO
+                          value: "/etc/ssl/certs/cafebabe-ca.pem"
+                        # let's not override JAVA_TOOL_OPTIONS
+                        # - name: JAVA_TOOL_OPTIONS
+                        #   value: "-Djavax.net.ssl.trustStore=/etc/ssl/cafebabe-ca.p12 -Djavax.net.ssl.trustStorePassword=changeit -Djavax.net.ssl.trustStoreType=PKCS12"
+                        # cloud sdk, not overridden (why? we're using aws endpoint!)
+                        # - name: AWS_CA_BUNDLE
+                        #   value: "/etc/ssl/certs/cafebabe-ca.pem"
+                        # - name: CLOUDSDK_CORE_CUSTOM_CA_CERTS_FILE
+                        #   value: "/etc/ssl/certs/cafebabe-ca.pem"
