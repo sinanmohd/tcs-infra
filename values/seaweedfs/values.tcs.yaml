@@ -1,4 +1,4 @@
 ingress:
   enabled: true
   https: true
-  host: s3.bud.tcssrss.com
+  host: s3.bud.tcsrss.com
