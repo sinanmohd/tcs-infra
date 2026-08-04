@@ -110,6 +110,13 @@ spec:
             - name: SSO_AUTO_CREATE_USERS
               value: "false"
           {{- end }}
+            # Spec 009 — the other end of budapp's MCP_TOOLGEN_INGEST_TOKEN.
+            - name: TOOL_GEN_NOTIFY_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Release.Name }}-toolgen-notify-token
+                  key: token
+                  optional: true
           {{ $root := . }}
           {{- range $key, $value := .Values.microservices.mcpgateway.env }}
             - name: {{ $key }}

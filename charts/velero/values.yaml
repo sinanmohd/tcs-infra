@@ -1,2 +1,4 @@
 velero:
   enabled: true
+  configuration:
+    logLevel: "warning"

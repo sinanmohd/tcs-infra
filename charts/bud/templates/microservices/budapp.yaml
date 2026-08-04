@@ -56,6 +56,13 @@ spec:
                 name: {{ .Release.Name }}-bud-internal-token
                 key: token
                 optional: true
+          # Spec 009 — shared secret for POST /connectors/generate/events on the public ingress.
+          - name: MCP_TOOLGEN_INGEST_TOKEN
+            valueFrom:
+              secretKeyRef:
+                name: {{ .Release.Name }}-toolgen-notify-token
+                key: token
+                optional: true
           - name: PRIVATE_KEY_PATH
             value: "/app/keys/rsa-private-key.pem"
           - name: PRIVATE_KEY_PASSWORD
@@ -270,6 +277,27 @@ spec:
       - match: event.type == "credential_update"
         path: /credentials/update
     default: /notifications
+  pubsubname: {{ .Release.Name }}-pubsub
+  deadLetterTopic: poisonMessages
+scopes:
+  - budapp
+---
+apiVersion: dapr.io/v2alpha1
+kind: Subscription
+metadata:
+  name: {{ .Release.Name }}-budapp-governance-events-subscription
+spec:
+  # Agent governance (FR-ESC-230 / WP-3.9): budprompt publishes onto the
+  # `governance-events` topic — the escalation Novu fan-out (governance.escalation) and the WP-3.9
+  # decision-resolved ledger updates (governance.decision_resolved). WITHOUT this
+  # Subscription every one of those is published-but-UNDELIVERED — the budapp consumer route
+  # never fires. The route self-routes by CloudEvent `type` inside receive_governance_event
+  # (decision_resolved → ledger; else → escalation fan-out), so a
+  # single default route suffices. Consumer + producers are already committed; only this
+  # topic→route binding was missing.
+  topic: governance-events
+  routes:
+    default: /governance/escalation-events
   pubsubname: {{ .Release.Name }}-pubsub
   deadLetterTopic: poisonMessages
 scopes:

@@ -30,6 +30,6 @@ maintainers:
 
 dependencies:
   - name: signoz
-    version: 0.133.0
+    version: 0.135.1
     repository: https://charts.signoz.io
     condition: signoz.enabled

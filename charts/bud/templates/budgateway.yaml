@@ -37,6 +37,9 @@ data:
     [gateway.analytics]
     enabled = true
     geoip_db_path = "/app/geo/GeoLite2-City.mmdb"
+    # Stamp the trusted x-bud-* geo headers onto proxied requests (FR-CTX-030).
+    # Requires the GeoLite2-City DB mounted above; without it all geo stays absent.
+    geoip_inject_headers = true
 
     [gateway.observability]
     enabled = false

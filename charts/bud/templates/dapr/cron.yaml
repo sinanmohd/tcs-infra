@@ -88,6 +88,26 @@ scopes:
 apiVersion: dapr.io/v1alpha1
 kind: Component
 metadata:
+  name: governance-endpoint-ref-reconcile
+spec:
+  type: bindings.cron
+  version: v1
+  metadata:
+  - name: schedule
+    # Part B keep-alive + self-heal for the deployment-mirror governance refs; must stay
+    # well under the budprompt mirror's L2 TTL (3600s) or governed deployments silently
+    # revert to ungoverned on the transparent path.
+    value: "@every 10m"
+  - name: direction
+    value: "input"
+  - name: route
+    value: "/governance/endpoint-ref-reconcile-cron"
+scopes:
+  - budapp
+---
+apiVersion: dapr.io/v1alpha1
+kind: Component
+metadata:
   name: prompt-cleanup-scheduler
 spec:
   type: bindings.cron
@@ -191,3 +211,21 @@ spec:
     value: "/cron/session-reaper"
 scopes:
   - budevent
+
+---
+apiVersion: dapr.io/v1alpha1
+kind: Component
+metadata:
+  name: generated-tool-job-reaper
+spec:
+  type: bindings.cron
+  version: v1
+  metadata:
+  - name: schedule
+    value: "@every 1h"  # Expire unconfirmed tool generations (GENERATED_SOURCE_JOB_TTL_HOURS)
+  - name: direction
+    value: "input"
+  - name: route
+    value: "/connectors/generate-jobs-reap"
+scopes:
+  - budapp

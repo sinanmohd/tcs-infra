@@ -30,6 +30,11 @@ spec:
       labels:
         app: "{{ .Release.Name }}-embed"
     spec:
+      {{- $affinity := include "bud.affinity" (dict "service" .Values.microservices.budapp "global" .Values.global "context" $) }}
+      {{- if $affinity }}
+      affinity:
+        {{- $affinity | nindent 8 }}
+      {{- end }}
       containers:
       - name: embed
         image: "registry.bud.studio/novu/embed:0.24.0"

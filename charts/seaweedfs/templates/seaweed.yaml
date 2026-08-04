@@ -11,9 +11,14 @@ spec:
   # disable builtin mTLS, use istio
   tls: {}
 
+  {{- with $.Values.affinity }}
+  affinity:
+    {{- . | toYaml | nindent 4 }}
+  {{- end }}
+
   volumeTopology:
     {{- if $.Values.volumeTopology }}
-{{- $.Values.volumeTopology | toYaml | nindent 4 }}
+    {{- $.Values.volumeTopology | toYaml | nindent 4 }}
     {{- else }}
     default:
       replicas: {{ $.Values.replicas.volume }}

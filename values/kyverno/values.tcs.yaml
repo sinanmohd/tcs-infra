@@ -24,7 +24,7 @@ clusterPolicies:
                       volumeMounts:
                         - name: tcs-ca
                           mountPath: /etc/ssl/certs
-                          subPath: tcs-ca.pem
+                          subPath: cafebabe-ca.pem
                           readOnly: true
                         # - name: selfsigned-with-default-ca
                         #   mountPath: /etc/ssl/certs/tcs-ca.pem

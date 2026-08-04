@@ -1,9 +1,7 @@
-{{ $installName := "clickhouse" }}
-{{ $clusterName := "cluster" }}
 apiVersion: clickhouse.altinity.com/v1
 kind: ClickHouseInstallation
 metadata:
-  name: {{ $installName | quote }}
+  name: clickhouse
 spec:
   configuration:
     files:
@@ -72,7 +70,7 @@ spec:
           port: 2181
     {{- end }}
     clusters:
-      - name: {{ $clusterName | quote }}
+      - name: cluster
         layout:
           shardsCount: 1
           replicasCount: {{ .Values.replicaCount }}
@@ -91,16 +89,10 @@ spec:
               resources:
                 {{- . | toYaml | nindent 16 }}
               {{- end }}
+          {{- with $.Values.affinity }}
           affinity:
-            podAntiAffinity:
-              preferredDuringSchedulingIgnoredDuringExecution:
-              - podAffinityTerm:
-                  labelSelector:
-                    matchLabels:
-                      clickhouse.altinity.com/chi: {{ $installName | quote }}
-                      clickhouse.altinity.com/cluster: {{ $clusterName | quote }}
-                  topologyKey: kubernetes.io/hostname
-                weight: 100
+            {{- . | toYaml | nindent 14 }}
+          {{- end }}
 
     volumeClaimTemplates:
       - name: clickhouse-storage

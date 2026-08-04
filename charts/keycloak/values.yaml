@@ -18,6 +18,7 @@ image: ""
 imagePullSecrets: []
 
 realms: {}
+affinity: {}
 
 keycloak-operator:
   enabled: true

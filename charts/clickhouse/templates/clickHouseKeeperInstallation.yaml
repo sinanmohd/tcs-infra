@@ -1,14 +1,12 @@
-{{ $installName := "clickhouse-keeper" }}
-{{ $clusterName := "chk01" }}
 {{- if $.Values.keeper.enabled }}
 apiVersion: "clickhouse-keeper.altinity.com/v1"
 kind: "ClickHouseKeeperInstallation"
 metadata:
-  name: {{ $installName | quote }}
+  name: clickhouse-keeper
 spec:
   configuration:
     clusters:
-      - name: {{ $clusterName | quote }}
+      - name: chk01
         layout:
           replicasCount: 3
 
@@ -28,16 +26,10 @@ spec:
             - name: clickhouse-keeper
               imagePullPolicy: IfNotPresent
               image: {{ $.Values.keeper.image | quote }}
+          {{- with $.Values.keeper.affinity }}
           affinity:
-            podAntiAffinity:
-              preferredDuringSchedulingIgnoredDuringExecution:
-              - podAffinityTerm:
-                  labelSelector:
-                    matchLabels:
-                      clickhouse-keeper.altinity.com/chk: {{ $installName | quote }}
-                      clickhouse-keeper.altinity.com/cluster: {{ $clusterName | quote }}
-                  topologyKey: kubernetes.io/hostname
-                weight: 100
+            {{- . | toYaml | nindent 14 }}
+          {{- end }}
           securityContext:
             fsGroup: 101
 

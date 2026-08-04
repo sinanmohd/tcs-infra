@@ -7,6 +7,12 @@ metadata:
     strimzi.io/cluster: kafka
 spec:
   replicas: {{ $.Values.replicas }}
+  {{- with $.Values.affinity }}
+  template:
+    pod:
+      affinity:
+        {{- . | toYaml | nindent 8 }}
+  {{- end }}
   roles:
     - controller
     - broker

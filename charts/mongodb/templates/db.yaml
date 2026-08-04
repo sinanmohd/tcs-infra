@@ -51,17 +51,11 @@ spec:
   replsets:
   - name: rs0
     size: {{ $.Values.replsetSize }}
+    {{- with $.Values.affinity }}
     affinity:
       advanced:
-        podAntiAffinity:
-          preferredDuringSchedulingIgnoredDuringExecution:
-            - podAffinityTerm:
-                topologyKey: kubernetes.io/hostname
-                labelSelector:
-                  matchLabels:
-                    app.kubernetes.io/component: mongod
-                    app.kubernetes.io/replset: rs0
-              weight: 100
+        {{- . | toYaml | nindent 8 }}
+    {{- end }}
     podDisruptionBudget:
       maxUnavailable: 1
     resources:

@@ -5,6 +5,17 @@ storage:
   size: 4Gi
   className: ""
 
+affinity:
+  podAntiAffinity:
+    preferredDuringSchedulingIgnoredDuringExecution:
+      - podAffinityTerm:
+          topologyKey: kubernetes.io/hostname
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/component: mongod
+              app.kubernetes.io/replset: rs0
+        weight: 100
+
 users: {}
 
 psmdb-operator:

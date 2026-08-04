@@ -18,7 +18,7 @@ global:
   affinity:
     nodeAffinity:
       preferredDuringSchedulingIgnoredDuringExecution:
-        - weight: 50
+        - weight: 75
           preference:
             matchExpressions:
               - key: bud.studio/control-plane
@@ -181,21 +181,61 @@ novu:
   store:
     encryption-key: bud-gUXY7j0k14yinhZm4w!eSqBGlexz
   ws:
+    affinity:
+      nodeAffinity:
+        preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 75
+            preference:
+              matchExpressions:
+                - key: bud.studio/control-plane
+                  operator: In
+                  values:
+                    - "true"
     image:
       registry: registry.bud.studio
       repository: novu/ws
       tag: 0.24.0
   worker:
+    affinity:
+      nodeAffinity:
+        preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 75
+            preference:
+              matchExpressions:
+                - key: bud.studio/control-plane
+                  operator: In
+                  values:
+                    - "true"
     image:
       registry: registry.bud.studio
       repository: novu/worker
       tag: 0.24.0
   web:
+    affinity:
+      nodeAffinity:
+        preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 75
+            preference:
+              matchExpressions:
+                - key: bud.studio/control-plane
+                  operator: In
+                  values:
+                    - "true"
     image:
       registry: registry.bud.studio
       repository: novu/web
       tag: 0.24.0
   api:
+    affinity:
+      nodeAffinity:
+        preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 75
+            preference:
+              matchExpressions:
+                - key: bud.studio/control-plane
+                  operator: In
+                  values:
+                    - "true"
     image:
       registry: registry.bud.studio
       repository: novu/api
@@ -268,7 +308,7 @@ microservices:
       -----END PUBLIC KEY-----
   budadmin:
     enabled: true
-    image: registry.bud.studio/runtime/budadmin:1.1.0
+    image: registry.bud.studio/runtime/budadmin:1.1.2
     env:
     nodeSelector: {}
     affinity: {}
@@ -287,7 +327,7 @@ microservices:
       scaleUpStabilizationSeconds: 30
   budcustomer:
     enabled: true
-    image: registry.bud.studio/runtime/budcustomer:1.1.0
+    image: registry.bud.studio/runtime/budcustomer:1.1.2
     env: {}
     nodeSelector: {}
     affinity: {}
@@ -306,7 +346,7 @@ microservices:
       scaleUpStabilizationSeconds: 30
   budplayground:
     enabled: true
-    image: registry.bud.studio/runtime/budplayground:1.1.0
+    image: registry.bud.studio/runtime/budplayground:1.1.2
     env: {}
     nodeSelector: {}
     affinity: {}
@@ -325,7 +365,7 @@ microservices:
       scaleUpStabilizationSeconds: 30
   budgateway:
     enabled: true
-    image: registry.bud.studio/runtime/budgateway:1.1.0
+    image: registry.bud.studio/runtime/budgateway:1.1.2
     env:
       # Distributed-trace content capture (see microservices.budprompt.env for the full note).
       # DEBUG-FIRST: full LLM request/response bodies + messages recorded on spans by default.
@@ -334,6 +374,10 @@ microservices:
       # (the gateway has no SDK value-length limit, so this app-side cap is the only backstop).
       BUD_TRACE_CAPTURE_CONTENT: "true"
       BUD_TRACE_BODY_MAX_BYTES: "262144"
+      # WP-3.4 (FR-CTX-170): trusted request-attribute allowlist — header names
+      # (case-insensitive) the gateway remove-then-injects and stamps as `headers.*`
+      # governance facts. ONE source, kept in sync with the budprompt and budapp
+      # TRUSTED_REQUEST_ATTRIBUTES env (NFR-270). Empty ⇒ no client header trusted.
     nodeSelector: {}
     affinity: {}
     resources:
@@ -383,7 +427,7 @@ microservices:
         memory: 8Gi
   semanticRouter:
     enabled: true
-    image: registry.bud.studio/runtime/semantic-router:1.1.0
+    image: registry.bud.studio/runtime/semantic-router:1.1.2
     replicas: 1
     env: {}
     nodeSelector: {}
@@ -443,6 +487,15 @@ microservices:
       MCPGATEWAY_EVENTS_EGRESS_ALLOW_HOSTS: "{{ .Release.Name }}-budprompt"
       # Prometheus exporter (mcpgateway/services/metrics.py), not the admin Metrics tab.
       ENABLE_METRICS: "false"
+      # Spec 009 progress push. An empty url disables it; keep in step with budapp's GENERATED_SOURCE_PUSH_ENABLED.
+      TOOL_GEN_NOTIFY_URL: "{{ if .Values.microservices.mcpgateway.toolGenNotifyEnabled }}http://{{ .Release.Name }}-budapp:9082/connectors/generate/events{{ end }}"
+      # TOOL_GEN_NOTIFY_TOKEN is a secretKeyRef on the Deployment, not an env value here.
+      TOOL_GEN_NOTIFY_TIMEOUT_S: "3.0"
+      # budapp's GENERATED_SOURCE_JOB_TTL_HOURS must stay <= this.
+      TOOL_GEN_PARSE_TTL_HOURS: "24"
+    toolGenNotifyEnabled: true
+    # Shared secret for both ends of the notify wire. Empty = generated on install and kept across upgrades.
+    toolGenNotifyToken: ""
     ssrfProtectionEnabled: false
     sso:
       enabled: true
@@ -466,7 +519,7 @@ microservices:
       scaleUpStabilizationSeconds: 30
   askbud:
     enabled: true
-    image: registry.bud.studio/runtime/askbud:1.1.0
+    image: registry.bud.studio/runtime/askbud:1.1.2
     daprid: askbud
     model: bud-gpt-oss-20b-ada28b58
     env:
@@ -489,7 +542,7 @@ microservices:
       scaleUpStabilizationSeconds: 30
   budapp:
     enabled: true
-    image: registry.bud.studio/runtime/budapp:1.1.0
+    image: registry.bud.studio/runtime/budapp:1.1.2
     daprid: budapp
     psqlHost: "pooler-rw-txn.postgres"
     corsOrigins:
@@ -552,6 +605,21 @@ microservices:
       GRAFANA_URL: "{{ $.Release.Name }}-grafana"
       OIDC_ISSUER: "{{ $.Values.externalServices.oidc.url }}"
       OIDC_ROLES_CLAIM_PATH: "realm_access.roles"
+      # Agent-governance guard-type capability allowlist (WP-3.2, FR-DATA-120). Comma list of
+      # the hooks this stack can enforce; authoring/promoting a policy that targets a hook
+      # outside this set 422s/409s. Default = the four Phase-1 hooks (Phase-3 hooks stay off).
+      # WP-3.6 (FR-VRD-080): verdict capability allowlist — authoring a verdict outside this set
+      # 422s. Default = the five Phase-1/2 verdicts; the Phase-3 `obligation` verdict stays off
+      # until the deployed gateway+sentinel advertise support.
+      # WP-3.4 (FR-CTX-170): trusted request-attribute allowlist (budapp sink of one-source-three-sinks
+      # — keep in sync with the gateway + budprompt TRUSTED_REQUEST_ATTRIBUTES). Feeds the authoring
+      # condition-key picker's discovery endpoint. Empty ⇒ no headers.* keys suggested.
+      # Part B (option iii): deliver resolved governance_policy_refs to the deployment mirror
+      # (model.endpoint.updated → responses_config.governance_policy_refs) so the transparent
+      # /v1/responses path can resolve bindings. DELIVERY only — enforcement stays behind
+      # budprompt's GOVERNANCE_ENABLED. Refs flow only when exactly ONE governed agent backs a
+      # deployment; ambiguous mappings stay ungoverned and log loudly.
+      GOVERNANCE_ENDPOINT_REF_SYNC_ENABLED: "true"
       OIDC_ACCOUNT_MANAGEMENT_URL: "{{ $.Values.externalServices.oidc.url }}/account"
       OIDC_VERIFY_SSL: "false"
       # Keycloak set-password/verify-email link lifespan (seconds); 12h.
@@ -564,6 +632,13 @@ microservices:
       BUD_PROMPT_SERVICE_URL: "http://{{ $.Release.Name }}-budprompt:3015/"
       BUDGATEWAY_BASE_URL: "http://{{ $.Release.Name }}-budgateway:3000"
       ROUTER_SYNC_BOOT_VERIFY_REDIS: "false"
+      # Spec 009 tool generator. Needs an mcpgateway image carrying the generate routes.
+      GENERATED_TOOL_SOURCES_ENABLED: "true"
+      GENERATED_SOURCE_PREVIEW_MODE: "true"
+      GENERATED_SOURCE_PUSH_ENABLED: "true"
+      # Must be <= mcpgateway's TOOL_GEN_PARSE_TTL_HOURS.
+      GENERATED_SOURCE_JOB_TTL_HOURS: "24"
+      # MCP_TOOLGEN_INGEST_TOKEN is a secretKeyRef on the Deployment, not an env value here.
     nodeSelector: {}
     affinity: {}
     resources:
@@ -581,7 +656,7 @@ microservices:
       scaleUpStabilizationSeconds: 30
   budcluster:
     enabled: true
-    image: registry.bud.studio/runtime/budcluster:1.1.0
+    image: registry.bud.studio/runtime/budcluster:1.1.2
     daprid: budcluster
     registerDefaultCluster:
       enabled: true
@@ -632,9 +707,10 @@ microservices:
   budmetrics:
     enabled: true
     daprid: budmetrics
-    image: registry.bud.studio/runtime/budmetrics:1.1.0
+    image: registry.bud.studio/runtime/budmetrics:1.1.2
     env:
       INFERENCE_URL: http://172.184.137.177:8502/classify
+      GOVERNANCE_DECISION_RETENTION_DAYS: "90"
     # Phase-2 steady-state settle cron. Runs `migrate_clickhouse.py --settle-cycle` on a schedule so
     # the coalescing fact tables (InferenceFact / AgentInvocationFact) and TraceSummary keep advancing
     # after the cutover. Single-writer via concurrencyPolicy: Forbid. Set enabled: false to turn off
@@ -664,7 +740,7 @@ microservices:
       scaleUpStabilizationSeconds: 30
   budmodel:
     enabled: true
-    image: registry.bud.studio/runtime/budmodel:1.1.0
+    image: registry.bud.studio/runtime/budmodel:1.1.2
     daprid: budmodel
     env:
       LOG_LEVEL: INFO
@@ -706,7 +782,7 @@ microservices:
         purgeAgeDays: 7
   budeval:
     enabled: false
-    image: registry.bud.studio/runtime/budeval:1.1.0
+    image: registry.bud.studio/runtime/budeval:1.1.2
     daprid: budeval
     env: {}
     nodeSelector: {}
@@ -726,7 +802,7 @@ microservices:
       scaleUpStabilizationSeconds: 60
   budsim:
     enabled: true
-    image: registry.bud.studio/runtime/budsim:1.1.0
+    image: registry.bud.studio/runtime/budsim:1.1.2
     daprid: budsim
     env:
       LOG_LEVEL: INFO
@@ -747,7 +823,7 @@ microservices:
       scaleUpStabilizationSeconds: 60
   buddoc:
     enabled: true
-    image: registry.bud.studio/runtime/buddoc:1.1.0
+    image: registry.bud.studio/runtime/buddoc:1.1.2
     daprid: buddoc
     env:
       LOG_LEVEL: INFO
@@ -772,7 +848,7 @@ microservices:
       scaleUpStabilizationSeconds: 60
   budnotify:
     enabled: true
-    image: registry.bud.studio/runtime/budnotify:1.1.0
+    image: registry.bud.studio/runtime/budnotify:1.1.2
     daprid: budnotify
     pubsubTopic: notificationMessages
     env:
@@ -798,7 +874,7 @@ microservices:
   budprompt:
     enabled: true
     daprid: budprompt
-    image: registry.bud.studio/runtime/budprompt:1.1.0
+    image: registry.bud.studio/runtime/budprompt:1.1.2
     # Processes per pod (asyncio = 1 core/worker); set ~= 2x cpu limit. Each is a
     # full ~300Mi process; WORKER_POOL_SIZE/BUD_GATEWAY_MAX_CONNECTIONS are PER WORKER.
     uvicornWorkers: 4
@@ -889,15 +965,13 @@ microservices:
   budcodeinterpreter:
     enabled: false
     daprid: budcodeinterpreter
-    image: registry.bud.studio/runtime/budcodeinterpreter:1.1.0
+    image: registry.bud.studio/runtime/budcodeinterpreter:1.1.2
     env:
       LOG_LEVEL: INFO
-
       OPENSANDBOX_DOMAIN: "opensandbox.bud.lan"
       OPENSANDBOX_PROTOCOL: "http"
       OPENSANDBOX_USE_SERVER_PROXY: "true"
       SECRETS_OPENSANDBOX_API_KEY: "change_me_fiER89YrB8fsnizEqozepGIp6VxmTlDc"
-
       E2B_DOMAIN: http://164.52.200.72:3000
       E2B_SANDBOX_URL: http://164.52.200.72:3002
       CODE_INTERPRETER_DEFAULT_TEMPLATE: code-interpreter-2g-2c
@@ -927,7 +1001,7 @@ microservices:
       scaleUpStabilizationSeconds: 30
   budpipeline:
     enabled: true
-    image: registry.bud.studio/runtime/budpipeline:1.1.0
+    image: registry.bud.studio/runtime/budpipeline:1.1.2
     daprid: budpipeline
     pubsubTopic: budpipelineEvents
     env:
@@ -941,7 +1015,7 @@ microservices:
         memory: 1Gi
   budevent:
     enabled: true
-    image: registry.bud.studio/runtime/budevent:1.1.0
+    image: registry.bud.studio/runtime/budevent:1.1.2
     daprid: budevent
     psqlHost: "pooler-rw-txn.postgres"
     env:
@@ -1130,7 +1204,16 @@ otelCollector:
     headers: {}
   # Optional node scheduling for OTel Collector
   nodeSelector: {}
-  affinity: {}
+  affinity:
+    nodeAffinity:
+      preferredDuringSchedulingIgnoredDuringExecution:
+        - weight: 75
+          preference:
+            matchExpressions:
+              - key: bud.studio/control-plane
+                operator: In
+                values:
+                  - "true"
 prometheus:
   enabled: true
   alertmanager:
@@ -1151,9 +1234,53 @@ prometheus:
       limits:
         memory: 16Gi
     nodeSelector: {}
-    affinity: {}
-  # Drop the subchart's default cluster-wide scrape jobs (apiserver/etcd histograms + NFD node-label explosion) that bloat this HPA-only Prometheus to 10GB+; keep only self + kubernetes-pods (app jobs append via extraScrapeConfigs). Replaces scrape_configs only; Helm merges the map so rule_files survive.
+    affinity:
+      nodeAffinity:
+        preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 75
+            preference:
+              matchExpressions:
+                - key: bud.studio/control-plane
+                  operator: In
+                  values:
+                    - "true"
+  # WP-2.10 (NFR-240): chart-default governance HITL alert rules (tunable). Fire on approver-bottleneck
+  # (pending backlog age > TTL/2), sustained TTL expiries, and rubber-stamp auto-approval share > 90%/24h.
   serverFiles:
+    alerting_rules.yml:
+      groups:
+        - name: governance-hitl
+          rules:
+            - alert: GovernanceEscalationBacklogAgeHigh
+              # pending backlog age p95 approaching half the default escalation TTL (259200s / 2).
+              expr: histogram_quantile(0.95, sum(rate(governance_escalation_resolution_seconds_bucket[1h])) by (le)) > 129600
+              for: 15m
+              labels:
+                severity: warning
+              annotations:
+                summary: "Governance escalation resolution p95 exceeds TTL/2 (approver bottleneck)"
+            - alert: GovernanceEscalationsExpiring
+              # any sustained TTL-expiry rate means approvers are not keeping up (safe-default firing).
+              expr: sum(rate(governance_escalations_expired_total[15m])) > 0
+              for: 15m
+              labels:
+                severity: warning
+              annotations:
+                summary: "Governance escalations are expiring on TTL (safe-default applied)"
+            - alert: GovernanceStandingGrantRubberStamp
+              # auto-approval share of a policy's escalations > 90% over 24h ⇒ review whether it should be notify.
+              expr: |
+                sum(increase(governance_standing_grant_auto_approvals_total[24h])) by (policy_id)
+                / clamp_min(sum(increase(governance_verdicts_total{verdict="escalate"}[24h])) by (policy_id), 1) > 0.9
+              for: 1h
+              labels:
+                severity: warning
+              annotations:
+                summary: "Standing-grant auto-approval share > 90% over 24h (rubber-stamp anomaly)"
+    # (master) Drop the subchart's default cluster-wide scrape jobs (apiserver/etcd histograms + NFD
+    # node-label explosion) that bloat this HPA-only Prometheus to 10GB+; keep only self +
+    # kubernetes-pods (app jobs append via extraScrapeConfigs). Replaces scrape_configs only; the
+    # serverFiles map merges, so alerting_rules.yml (above) survives.
     prometheus.yml:
       scrape_configs:
         - job_name: prometheus
@@ -1266,6 +1393,16 @@ prometheus:
           target_label: pod
 prometheus-adapter:
   enabled: true
+  affinity:
+    nodeAffinity:
+      preferredDuringSchedulingIgnoredDuringExecution:
+        - weight: 75
+          preference:
+            matchExpressions:
+              - key: bud.studio/control-plane
+                operator: In
+                values:
+                  - "true"
   prometheus:
     url: "http://{{ $.Release.Name }}-prometheus-server"
     port: 80

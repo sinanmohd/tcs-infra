@@ -10,6 +10,10 @@ spec:
     storageClass: {{ .Values.storageClass | quote }}
     {{- end }}
     size: {{ .Values.size | required "A valid size is required" | quote }}
+  {{- with $.Values.affinity }}
+  affinity:
+    {{- . | toYaml | nindent 4 }}
+  {{- end }}
   {{- if $.Values.users }}
   managed:
     roles:

@@ -3,6 +3,7 @@ storageClass: ""
 size: "16Gi"
 
 users: {}
+affinity: {}
 
 poolers:
   pooler-rw:
@@ -23,12 +24,12 @@ poolers:
         affinity:
           podAntiAffinity:
             preferredDuringSchedulingIgnoredDuringExecution:
-              - podAffinityTerm:
+              - weight: 100
+                podAffinityTerm:
                   topologyKey: kubernetes.io/hostname
                   labelSelector:
                     matchLabels:
                       app: pooler
-                weight: 100
 
 cloudnative-pg:
   enabled: true

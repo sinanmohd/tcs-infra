@@ -1,17 +1,38 @@
 altinity-clickhouse-operator:
   enabled: true
+  affinity:
 
 image: altinity/clickhouse-server:26.1.11.20001.altinityantalya
 storageClass: ""
 size: 8Gi
 reclaimPolicy: Retain # (Retain|Delete)
 replicaCount: 3
+affinity:
+  podAntiAffinity:
+    preferredDuringSchedulingIgnoredDuringExecution:
+      - podAffinityTerm:
+          labelSelector:
+            matchLabels:
+              clickhouse.altinity.com/chi: "clickhouse"
+              clickhouse.altinity.com/cluster: "cluster"
+          topologyKey: kubernetes.io/hostname
+        weight: 100
 
 keeper:
   enabled: true
   image: altinity/clickhouse-keeper:26.1.11.20001.altinityantalya
   storageClass: ""
   size: 1Gi
+  affinity:
+    podAntiAffinity:
+      preferredDuringSchedulingIgnoredDuringExecution:
+        - podAffinityTerm:
+            labelSelector:
+              matchLabels:
+                clickhouse-keeper.altinity.com/chk: "clickhouse-keeper"
+                clickhouse-keeper.altinity.com/cluster: "chk01"
+            topologyKey: kubernetes.io/hostname
+          weight: 100
 
 users: {}
 resources: {}

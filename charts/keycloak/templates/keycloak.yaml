@@ -3,6 +3,12 @@ kind: Keycloak
 metadata:
   name: keycloak
 spec:
+  {{- with $.Values.affinity }}
+  scheduling:
+    affinity:
+      {{- . | toYaml | nindent 6 }}
+  {{- end }}
+      
   instances: {{ $.Values.instances }}
   {{- with $.Values.image }}
   image: {{ . | quote }}

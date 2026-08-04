@@ -1,0 +1,23 @@
+{{- /* Spec 009 — one secret for both ends of the tool-generation push, so the two cannot drift. */ -}}
+{{- $secretName := printf "%s-toolgen-notify-token" .Release.Name }}
+{{- $existing := lookup "v1" "Secret" .Release.Namespace $secretName }}
+{{- $token := "" }}
+{{- if $existing }}
+{{-   $token = index $existing.data "token" | b64dec }}
+{{- else if .Values.microservices.mcpgateway.toolGenNotifyToken }}
+{{-   $token = .Values.microservices.mcpgateway.toolGenNotifyToken }}
+{{- else }}
+{{-   $token = randAlphaNum 48 }}
+{{- end }}
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ $secretName }}
+  labels:
+    bud.studio/component: toolgen-notify
+  annotations:
+    # Survives uninstall so the lookup above can preserve it across a reinstall.
+    "helm.sh/resource-policy": keep
+type: Opaque
+data:
+  token: {{ $token | b64enc | quote }}

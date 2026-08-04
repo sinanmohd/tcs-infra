@@ -36,3 +36,9 @@ spec:
   entityOperator:
     topicOperator: {}
     userOperator: {}
+    {{- with $.Values.affinity }}
+    template:
+      pod:
+        affinity:
+          {{- . | toYaml | nindent 10 }}
+    {{- end }}

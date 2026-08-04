@@ -1,0 +1,33 @@
+clusterPolicies:
+  inject-ca:
+    background: false
+    rules:
+      - name: inject-ca
+        match:
+          any:
+            - resources:
+                kinds:
+                  - Pod
+        preconditions:
+          all:
+            - key: "{{ request.namespace }}"
+              operator: AnyIn
+              value:
+                - "app"
+                - "app-*"
+        mutate:
+          foreach:
+            - list: request.object.spec.containers
+              patchStrategicMerge:
+                spec:
+                  containers:
+                    - name: "{{ element.name }}"
+                      volumeMounts:
+                        - name: ca-pemstore
+                          mountPath: /etc/ssl/certs
+                          subPath: cafebabe-ca.pem
+                          readOnly: true
+                  volumes:
+                    - name: ca-pemstore
+                      configMap:
+                        name: ca-pemstore
