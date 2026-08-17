@@ -97,7 +97,7 @@ spec:
             namespace: bud
             repoURL: registry.bud.studio/charts
             chart: bud
-            targetRevision: "1.2.2"
+            targetRevision: "1.2.4"
             valueFiles:
               - "$values/values/bud/secrets.demo.yaml"
               - "$values/values/bud/values.tcs.yaml"
