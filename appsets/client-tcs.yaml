@@ -101,6 +101,14 @@ spec:
             valueFiles:
               - "$values/values/bud/secrets.demo.yaml"
               - "$values/values/bud/values.tcs.yaml"
+          - name: bud-studio
+            namespace: bud-studio
+            repoURL: registry.bud.studio/charts
+            chart: budagent
+            targetRevision: "0.3.6"
+            valueFiles:
+              - "$values/values/bud-studio/secrets.demo.yaml"
+              - "$values/values/bud-studio/values.tcs.yaml"
   template:
     metadata:
       name: "tcs-{{.name}}"

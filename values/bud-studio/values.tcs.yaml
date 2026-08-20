@@ -1,0 +1,74 @@
+# budagent (Bud Studio) on the pnap demo cluster — https://studio.pnap.bud-demo.com
+#
+# Installed by infra/appsets/client-pnap.yaml into its own `bud-studio`
+# namespace; the bud release there lives in `bud`, so every cross-service URL
+# below is qualified with `.bud`.
+#
+# Release `bud-studio`, chart `budagent`: the chart's fullname helper drops the
+# release prefix only when the release name contains the chart name, so without
+# this every object would render as `bud-studio-budagent`.
+fullnameOverride: bud-studio
+
+image:
+  repository: registry.bud.studio/runtime/budagent
+  pullPolicy: IfNotPresent
+  # No pullSecrets here: the chart creates the Secret from `registries` in
+  # secrets.demo.yaml (chart >= 0.3.6) and references it while this is empty.
+
+web:
+  enabled: true
+  image:
+    repository: registry.bud.studio/runtime/budagent-web
+    pullPolicy: IfNotPresent
+
+budagent:
+  corsOrigin: "*"
+
+ingress:
+  enabled: true
+  className: traefik
+  host: studio.bud.tcsrss.com
+  tlsSecretName: bud-studio-acme-cert
+  # cert-manager's ingress-shim issues through the cluster's default issuer,
+  # letsencrypt-dns01 (see infra/values/cert-manager/values.demo.yaml).
+  annotations:
+    kubernetes.io/tls-acme: "true"
+
+# --- Database -------------------------------------------------------------
+# Shared CloudNativePG cluster in the `postgres` namespace. The `budagent`
+# database comes from the `bud` user's `databases:` list in
+# infra/values/postgres/values.budruntime.yaml, which this cluster also uses.
+postgresql:
+  enabled: false
+
+# --- Keycloak -------------------------------------------------------------
+# The realm at auth.pnap.bud-demo.com. budagent validates tokens minted for the
+# budadmin-web client, so it reuses that client rather than owning one; the
+# client is provisioned by the keycloak chart, hence clientBootstrap disabled.
+keycloak:
+  enabled: false
+  clientBootstrap:
+    enabled: false
+
+externalKeycloak:
+  baseUrl: https://auth.pnap.bud-demo.com
+  realm: bud-keycloak
+  clientId: budadmin-web
+
+# --- Bud platform wiring (all in the `bud` namespace) ----------------------
+budApp:
+  enabled: true
+  url: http://bud-budapp.bud:9082
+
+budGateway:
+  enabled: true
+  url: http://bud-budgateway.bud:3000
+  # Must name a model actually deployed on this cluster; kimi-k25 is what the
+  # chart's own pnap example carries. Verify before relying on agent runs.
+  model: kimi-k25
+  # apiKey intentionally unset: with no key and no existingSecret, budagent
+  # forwards the caller's Keycloak bearer token to the gateway.
+
+mcpGateway:
+  enabled: true
+  url: http://bud-mcpgateway.bud:4444
