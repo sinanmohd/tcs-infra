@@ -24,6 +24,7 @@ users:
       - mcpgateway
       - budpipeline
       - onyx
+      - budagent
 
 poolers:
   pooler-rw-txn:
