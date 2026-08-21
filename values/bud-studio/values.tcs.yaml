@@ -28,7 +28,7 @@ ingress:
   enabled: true
   className: traefik
   host: studio.bud.tcsrss.com
-  tlsSecretName: bud-studio-acme-cert
+  # tlsSecretName: bud-studio-acme-cert
   # cert-manager's ingress-shim issues through the cluster's default issuer,
   # letsencrypt-dns01 (see infra/values/cert-manager/values.demo.yaml).
   annotations:
@@ -51,7 +51,7 @@ keycloak:
     enabled: false
 
 externalKeycloak:
-  baseUrl: https://auth.pnap.bud-demo.com
+  baseUrl: https://auth.bud.tcsrss.com
   realm: bud-keycloak
   clientId: budadmin-web
 
