@@ -21,6 +21,15 @@ web:
     repository: registry.bud.studio/runtime/budagent-web
     pullPolicy: IfNotPresent
 
+  # Re-badges the sidebar rail: the wordmark beside the logo, expanded rail
+  # only (chart >= 0.3.7). Deliberately does NOT touch the title bar above
+  # it, the chat avatar, the welcome screens or the sign-in panel — those
+  # keep "Bud Studio" so the product still names itself somewhere.
+  #
+  # Roughly twenty characters fit before the rail ellipsizes; this is 15.
+  branding:
+    name: "TCS ICC Studio"
+
 budagent:
   corsOrigin: "*"
 

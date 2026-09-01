@@ -105,7 +105,7 @@ spec:
             namespace: bud-studio
             repoURL: registry.bud.studio/charts
             chart: budagent
-            targetRevision: "0.3.6"
+            targetRevision: "0.3.7"
             valueFiles:
               - "$values/values/bud-studio/secrets.demo.yaml"
               - "$values/values/bud-studio/values.tcs.yaml"
